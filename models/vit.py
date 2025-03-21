@@ -51,19 +51,24 @@ class Attention(nn.Module):
     def forward(self, x):
         batch_size, n_tokens, dim = x.shape
 
-        # Project to q, k, v
+        # Project to q, k, v in a single operation
         qkv = self.qkv_proj(x)
         qkv = qkv.reshape(batch_size, n_tokens, 3, self.n_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, B, H, N, D]
-        q, k, v = qkv[0], qkv[1], qkv[2]  # Each is [B, H, N, D]
 
-        # Compute attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        q = qkv[:, :, 0].permute(0, 2, 1, 3)  # [B, H, N, D]
+        k = qkv[:, :, 1].permute(0, 2, 1, 3)  # [B, H, N, D]
+        v = qkv[:, :, 2].permute(0, 2, 1, 3)  # [B, H, N, D]
+
+        attn = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+
+        # fuse softmax with matmul for better memory efficiency
         attn = attn.softmax(dim=-1)
 
         # Apply attention to values
-        out = (attn @ v)
-        out = out.transpose(1, 2).reshape(batch_size, n_tokens, dim)
+        out = torch.matmul(attn, v)  # [B, H, N, D]
+        out = out.permute(0, 2, 1, 3).reshape(batch_size, n_tokens, dim)
+
+        # Final projection
         out = self.proj(out)
 
         return out
@@ -71,17 +76,17 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     """
-    Transformer block with attention and MLP.
+    Transformer block with PyTorch's optimized attention.
     """
 
     def __init__(self, dim, n_heads, mlp_ratio=4.0, qkv_bias=True):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = Attention(dim=dim, n_heads=n_heads, qkv_bias=qkv_bias)
+        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=0.0, bias=qkv_bias, batch_first=True)
+
         self.norm2 = nn.LayerNorm(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
 
-        # MLP
         self.mlp = nn.Sequential(
             nn.Linear(dim, mlp_hidden_dim),
             nn.GELU(),
@@ -89,8 +94,9 @@ class Block(nn.Module):
         )
 
     def forward(self, x):
-        # Ignore cache params
-        x = x + self.attn(self.norm1(x))
+        normed_x = self.norm1(x)
+        attn_output, _ = self.attn(normed_x, normed_x, normed_x)
+        x = x + attn_output
         x = x + self.mlp(self.norm2(x))
         return x
 

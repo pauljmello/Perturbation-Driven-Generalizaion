@@ -37,8 +37,6 @@ class BaseCNN(BaseModel):
         Initialize the CNN model.
         """
         super().__init__('cnn', model_size)
-
-        # Get architecture configuration
         config = get_architecture_config('cnn', model_size)
         self.channels = config['channels']
 
@@ -54,9 +52,7 @@ class BaseCNN(BaseModel):
 
         input_size = 28 if input_channels == 1 else 32
 
-
         self.max_pool_ops = min(len(self.channels), int(torch.log2(torch.tensor(input_size)).item()))
-        logger.info(f"{model_size} CNN model will apply {self.max_pool_ops} pooling operations")
 
         feature_size = input_size // (2 ** self.max_pool_ops)
 

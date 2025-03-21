@@ -89,6 +89,7 @@ class AugmentationPipeline:
         """
         result = x
         for aug in self.augmentations:
-            if random.random() < 0.5:
+            application_probability = aug.intensity if hasattr(aug, 'intensity') else 0.5
+            if random.random() < application_probability:
                 result = aug(result)
         return result

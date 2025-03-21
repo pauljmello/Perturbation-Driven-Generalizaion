@@ -36,13 +36,10 @@ class BaseModel(nn.Module, ABC):
         """
         if self._param_count is not None:
             return self._param_count
-
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         non_trainable_params = total_params - trainable_params
-
         self._param_count = {'total': total_params, 'trainable': trainable_params, 'non_trainable': non_trainable_params}
-
         return self._param_count
 
     def get_model_info(self) -> Dict[str, Any]:

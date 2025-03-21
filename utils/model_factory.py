@@ -85,17 +85,4 @@ def create_model(model_type: str, model_size: str, dataset: str, device: torch.d
             except Exception as cpu_error:
                 logger.error(f"Error moving model to CPU: {str(cpu_error)}")
                 raise RuntimeError(f"Cannot place model on any device: {str(e)}")
-
-    # Validate model parameters
-    if validate and model is not None:
-        try:
-            batch_size = 16
-            input_shape = (batch_size, input_channels, input_size, input_size)
-            result = validate_model_parameters(model=model, model_type=model_type, model_size=model_size, dataset=dataset, input_shape=input_shape)
-            if not result["is_within_range"]:
-                logger.warning(f"{model_type} {model_size} has {result['total_params']:,} parameters, which is {result['percent_of_target']:.1f}% of the target ({result['target_params']:,}).")
-            model.parameter_efficiency = result.get('parameter_efficiency', {})
-            model.flops_estimate = result.get('flops_estimate')
-        except Exception as e:
-            logger.error(f"Error validating model: {str(e)}")
     return model

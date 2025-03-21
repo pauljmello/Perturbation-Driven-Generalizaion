@@ -47,7 +47,7 @@ class TransformerBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, dim),
         )
 
-    def forward(self, x, use_cache=False, reset_cache=False):
+    def forward(self, x):
         x_norm = self.norm1(x)
         attn_out, _ = self.attn(x_norm, x_norm, x_norm)
         x = x + attn_out
@@ -103,7 +103,7 @@ class BaseTransformer(BaseModel):
             nn.Linear(self.embedding_dim, num_classes)
         )
 
-    def forward(self, x, use_cache=False):
+    def forward(self, x):
         batch_size = x.size(0)
 
         if self.patch_size > 1:
@@ -117,20 +117,12 @@ class BaseTransformer(BaseModel):
 
         x = self.positional_encoding(x)
 
-        # Apply transformer blocks with caching
-        for i, block in enumerate(self.transformer_blocks):
-            reset_cache = (i == 0)
-            x = block(x, use_cache=use_cache, reset_cache=reset_cache)
+        for block in self.transformer_blocks:
+            x = block(x)
 
-        # layer norm
         x = self.norm(x)
-
-        # Global average  pooling
         x = x.mean(dim=1)
-
-        # Classification
         x = self.classifier(x)
-
         return x
 
 

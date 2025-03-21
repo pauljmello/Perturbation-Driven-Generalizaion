@@ -103,36 +103,40 @@ class ModelTrainer:
 
     def calculate_loss(self, outputs, inputs=None, targets=None, targets_a=None, targets_b=None, lam=1.0):
         """
-        Simplified loss function that handles various model outputs and augmentation techniques.
+        Simplified and fair loss function that focuses on classification performance.
         """
-        cls_loss = 0.0
-        recon_loss = 0.0
-        kl_loss = 0.0
-
-        # Extract predictions and stats
-        if isinstance(outputs, tuple) and len(outputs) >= 4:
-            y_pred, x_recon, mu, log_var = outputs[:4]
-
-            if inputs is not None:
-                if x_recon.shape[-2:] != inputs.shape[-2:]:
-                    x_recon = F.interpolate(x_recon, size=inputs.shape[2:], mode='bilinear', align_corners=False)
-                recon_loss = F.mse_loss(x_recon, inputs)
-            # Calculate KL divergence
-            kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / mu.size(0)
+        if isinstance(outputs, tuple):
+            # For tuple outputs (like VAE)
+            y_pred = outputs[0]
+            if len(outputs) >= 4 and hasattr(self, 'track_auxiliary_losses') and self.track_auxiliary_losses:
+                self._track_vae_losses(outputs, inputs)
         else:
             y_pred = outputs
-
         if targets_a is not None and targets_b is not None and lam != 1.0:
+            # Mixup/Cutmix
             cls_loss = lam * self.criterion(y_pred, targets_a) + (1 - lam) * self.criterion(y_pred, targets_b)
         else:
+            # classification
             cls_loss = self.criterion(y_pred, targets)
 
-        if recon_loss > 0 or kl_loss > 0:
-            total_loss = cls_loss + recon_loss + 0.001 * kl_loss
-        else:
-            total_loss = cls_loss
+        return cls_loss
 
-        return total_loss
+    def _track_vae_losses(self, outputs, inputs):
+        """
+        Track VAE auxiliary losses for monitoring but not for optimization.
+        """
+        _, x_recon, mu, log_var = outputs[:4]
+
+        if inputs is not None and x_recon is not None:
+            if x_recon.shape[-2:] != inputs.shape[-2:]:
+                x_recon = F.interpolate(x_recon, size=inputs.shape[2:], mode='bilinear', align_corners=False)
+            recon_loss = F.mse_loss(x_recon, inputs).item()
+            self.metrics.setdefault('recon_loss', []).append(recon_loss)
+
+        # KL divergence
+        if mu is not None and log_var is not None:
+            kl_loss = (-0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / mu.size(0)).item()
+            self.metrics.setdefault('kl_loss', []).append(kl_loss)
 
     def train_epoch(self, epoch: int):
         """
@@ -305,7 +309,6 @@ class ModelTrainer:
         self.metrics['timing']['total_time'] = total_time
 
         # Generate timing summary
-        logger.info(f"Training completed in {total_time:.2f} seconds")
         logger.info(f"Time breakdown - Initial validation: {self.metrics['timing']['initial_validation_time']:.2f}s, Training: {self.metrics['timing']['training_time']:.2f}s, "
                     f"Validation: {self.metrics['timing']['validation_time']:.2f}s, Testing: {self.metrics['timing']['test_time']:.2f}s")
 

@@ -1,9 +1,10 @@
+import copy
 import logging
+import math
 from typing import Dict, Any
 
 logger = logging.getLogger('config')
 
-# Lists for experiment configurations
 EXPERIMENT_MODEL_TYPES = [
     'mlp',
     'cnn',
@@ -32,7 +33,7 @@ EXPERIMENT_AUGMENTATIONS = [
 ]
 
 EXPERIMENT_CONFIG = {
-    'dataset': 'cifar10',  # Options: 'mnist'or 'cifar10'
+    'dataset': 'cifar10',  # Options: 'mnist' or 'cifar10'
     'batch_size': 512,
     'num_epochs': 5,
     'learning_rate': 0.0004,
@@ -43,154 +44,151 @@ EXPERIMENT_CONFIG = {
     'random_seed': 0,
     'model_types': EXPERIMENT_MODEL_TYPES,  # Options include: 'mlp', 'cnn', 'transformer', 'vit', 'vae', 'unet'
     'model_sizes': EXPERIMENT_MODEL_SIZES,  # Options: 'small', 'medium', 'large'
-    'augmentations': EXPERIMENT_AUGMENTATIONS,  # Data augmentation techniques like 'gaussian_noise', 'rotation', etc.
+    'augmentations': EXPERIMENT_AUGMENTATIONS,  # Data augmentation techniques
 }
 
-# Target parameter counts
+# Target parameter
 PARAMETER_TARGETS = {
     'small': 1_000_000,  # ~1M parameters
     'medium': 3_000_000,  # ~3M parameters
     'large': 9_000_000,  # ~9M parameters
 }
 
-# MLP architecture configurations
+
+# MLP architecture
 MLP_ARCHITECTURE = {
     'small': {
-        'hidden_dims': [512, 384, 384, 128],
+        'hidden_dims': [464, 464, 464, 464],
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'hidden_dims': [1024, 896, 640, 640, 512, 384],
+        'hidden_dims': [704, 704, 704, 704, 704, 704],
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'hidden_dims': [1536, 1280, 1280, 1152, 896, 768, 768, 512],
+        'hidden_dims': [1062, 1062, 1062, 1062, 1062, 1062, 1062, 1062],
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
-# CNN architecture configurations
+# CNN architecture
 CNN_ARCHITECTURE = {
     'small': {
-        'channels': [64, 96, 128],
+        'channels': [64, 112, 160],
         'blocks': 2,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'channels': [64, 160, 224, 320],
+        'channels': [50, 100, 200, 401],
         'blocks': 3,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'channels': [64, 128, 256, 384, 608],
-        'blocks': 7,
+        'channels': [44, 88, 176, 348, 696],
+        'blocks': 4,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
-
-# Transformer architecture configurations
+# Transformer architecture
 TRANSFORMER_ARCHITECTURE = {
     'small': {
         'embed_dim': 160,
         'depth': 3,
-        'heads': 1,
-        'mlp_ratio': 2.0,
+        'heads': 2,
+        'mlp_ratio': 1.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'embed_dim': 216,
-        'depth': 5,
-        'heads': 2,
-        'mlp_ratio': 4.0,
+        'embed_dim': 240,
+        'depth': 4,
+        'heads': 3,
+        'mlp_ratio': 2.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'embed_dim': 320,
-        'depth': 7,
+        'embed_dim': 300,
+        'depth': 8,
         'heads': 4,
-        'mlp_ratio': 8.0,
+        'mlp_ratio': 4.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
-
-# Vision Transformer configurations
+# Vision Transformer (ViT)
 VIT_ARCHITECTURE = {
     'small': {
-        'embed_dim': 160,
+        'embed_dim': 164,
         'depth': 3,
-        'heads': 1,
-        'mlp_ratio': 2.0,
+        'heads': 2,
+        'mlp_ratio': 1.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'embed_dim': 216,
-        'depth': 5,
-        'heads': 2,
-        'mlp_ratio': 4.0,
+        'embed_dim': 249,
+        'depth': 4,
+        'heads': 3,
+        'mlp_ratio': 2.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'embed_dim': 320,
-        'depth': 7,
+        'embed_dim': 300,
+        'depth': 8,
         'heads': 4,
-        'mlp_ratio': 8.0,
+        'mlp_ratio': 4.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
-
-# VAE architecture configurations
+# VAE architecture
 VAE_ARCHITECTURE = {
     'small': {
         'hidden_dims': [64, 96, 128, 160],
-        'latent_dim': 160,
+        'latent_dim': 64,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'hidden_dims': [64, 128, 192, 256, 320],
-        'latent_dim': 256,
+        'hidden_dims': [64, 128, 180, 240, 292],
+        'latent_dim': 128,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'hidden_dims': [64, 128, 192, 256, 320, 384, 448],
-        'latent_dim': 512,
+        'hidden_dims': [96, 160, 224, 320, 412, 512],
+        'latent_dim': 256,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
-
-# UNet architecture configurations
+# UNet architecture
 UNET_ARCHITECTURE = {
     'small': {
-        'hidden_channels': [48, 96, 128],
+        'hidden_channels': [64, 96, 128],
         'depth': 2,
         'bilinear': True,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'hidden_channels': [64, 128, 256, 384],
+        'hidden_channels': [64, 80, 160, 232],
         'depth': 3,
         'bilinear': True,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'hidden_channels': [64, 128, 192, 256, 384],
-        'depth': 7,
-        'bilinear': False,
+        'hidden_channels': [64, 112, 192, 272, 374],
+        'depth': 6,
+        'bilinear': True,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
 
 
-# Dataset configuration
+# Dataset
 DATASET_CONFIG = {
     'mnist': {
         'input_channels': 1,
@@ -208,7 +206,7 @@ DATASET_CONFIG = {
     }
 }
 
-# Augmentation configuration
+# Augmentation
 AUGMENTATION_CONFIG = {
     'standard_augmentations': [
         'gaussian_noise',
@@ -232,7 +230,6 @@ AUGMENTATION_CONFIG = {
     'augmix_depth': 2,
 }
 
-# All architecture configurations
 ARCHITECTURE_CONFIGS = {
     'cnn': CNN_ARCHITECTURE,
     'mlp': MLP_ARCHITECTURE,
@@ -242,16 +239,18 @@ ARCHITECTURE_CONFIGS = {
     'unet': UNET_ARCHITECTURE,
 }
 
-def get_architecture_config(model_type: str, model_size: str) -> Dict[str, Any]:
+
+def get_architecture_config(model_type: str, model_size: str, dataset: str = None) -> Dict[str, Any]:
     """
-    Get the architecture configuration for a specific model type and size.
+    Get the architecture configuration for a specific model type and size,
+    with dataset-aware parameter scaling.
     """
     if model_type not in ARCHITECTURE_CONFIGS:
         raise ValueError(f"Unsupported model type: {model_type}")
     if model_size not in ['small', 'medium', 'large']:
         raise ValueError(f"Unsupported model size: {model_size}")
-    return ARCHITECTURE_CONFIGS[model_type][model_size]
-
+    config = copy.deepcopy(ARCHITECTURE_CONFIGS[model_type][model_size])
+    return config
 
 def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
     """
@@ -260,71 +259,3 @@ def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
     if dataset_name not in DATASET_CONFIG:
         raise ValueError(f"Unsupported dataset: {dataset_name}")
     return DATASET_CONFIG[dataset_name]
-
-
-class ParameterEstimator:
-    """
-    Advanced parameter estimation with architecture-specific calculations.
-    """
-
-    @staticmethod
-    def calculate_mlp_params(input_dim, hidden_dims, output_dim):
-        """
-        Calculate exact MLP parameter count.
-        """
-        params = 0
-        prev_dim = input_dim
-        for hidden_dim in hidden_dims:
-            params += prev_dim * hidden_dim + hidden_dim  # weights + biases
-            prev_dim = hidden_dim
-        params += prev_dim * output_dim + output_dim  # output layer
-        return params
-
-    @staticmethod
-    def calculate_cnn_params(input_channels, channels, kernel_size=3, use_batchnorm=True):
-        """
-        Calculate CNN parameter count with BatchNorm consideration.
-        """
-        params = 0
-        prev_channels = input_channels
-        for out_channels in channels:
-            params += kernel_size * kernel_size * prev_channels * out_channels + out_channels
-            if use_batchnorm:
-                params += 2 * out_channels
-            prev_channels = out_channels
-        feature_dim = 256
-        params += prev_channels * feature_dim + feature_dim
-        params += feature_dim * 10 + 10  # classifier
-
-        return params
-
-    @staticmethod
-    def calculate_transformer_params(input_dim, embed_dim, num_heads, num_layers, mlp_ratio, output_dim):
-        """
-        Calculate Transformer parameter count with attention head consideration.
-        """
-        params = 0
-        params += input_dim * embed_dim
-
-        # Positional embedding
-        seq_length = 64
-        params += seq_length * embed_dim
-
-        # Transformer blocks
-        for _ in range(num_layers):
-            params += 2 * embed_dim
-            params += 3 * embed_dim * embed_dim
-
-            # Self-attention: Output projection
-            params += embed_dim * embed_dim
-            params += 2 * embed_dim
-
-            # MLP block
-            mlp_dim = int(embed_dim * mlp_ratio)
-            params += embed_dim * mlp_dim + mlp_dim
-            params += mlp_dim * embed_dim + embed_dim
-
-        # Output projection
-        params += embed_dim * output_dim + output_dim
-
-        return params
