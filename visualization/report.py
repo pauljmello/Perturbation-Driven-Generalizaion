@@ -174,7 +174,7 @@ class ReportGenerator:
             else:
                 results_df[col] = 0.0
 
-        # Extract augmentation count
+        # get aug count
         if 'augmentation_count' not in results_df.columns:
             results_df['augmentation_count'] = results_df['augmentation_techniques'].apply(
                 lambda x: 0 if x == 'None' else len(str(x).split(',')))
@@ -201,7 +201,7 @@ class ReportGenerator:
                 f.write('No augmentation data available besides baseline.\n')
             return
 
-        # Merge with baseline
+        # concat baseline
         aug_df = aug_df.merge(baseline_by_model, on=['model_type', 'model_size'], suffixes=('', '_baseline'))
         aug_df['train_improvement'] = aug_df['train_acc'] - aug_df['train_acc_baseline']
         aug_df['val_improvement'] = aug_df['val_acc'] - aug_df['val_acc_baseline']

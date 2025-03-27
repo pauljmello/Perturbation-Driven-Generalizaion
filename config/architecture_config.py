@@ -1,6 +1,5 @@
 import copy
 import logging
-import math
 from typing import Dict, Any
 
 logger = logging.getLogger('config')
@@ -35,11 +34,11 @@ EXPERIMENT_AUGMENTATIONS = [
 EXPERIMENT_CONFIG = {
     'dataset': 'cifar10',  # Options: 'mnist' or 'cifar10'
     'batch_size': 512,
-    'num_epochs': 5,
+    'num_epochs': 3,
     'learning_rate': 0.0004,
     'weight_decay': 1e-5,
     'optimizer': 'adamw',  # Options: 'adam', 'adamw', 'sgd'
-    'scheduler': 'none',   # Options: 'step', 'cosine', 'none'
+    'scheduler': 'none',  # Options: 'step', 'cosine', 'none'
     'num_runs': 1,
     'random_seed': 0,
     'model_types': EXPERIMENT_MODEL_TYPES,  # Options include: 'mlp', 'cnn', 'transformer', 'vit', 'vae', 'unet'
@@ -53,7 +52,6 @@ PARAMETER_TARGETS = {
     'medium': 3_000_000,  # ~3M parameters
     'large': 9_000_000,  # ~9M parameters
 }
-
 
 # MLP architecture
 MLP_ARCHITECTURE = {
@@ -187,7 +185,6 @@ UNET_ARCHITECTURE = {
     }
 }
 
-
 # Dataset
 DATASET_CONFIG = {
     'mnist': {
@@ -242,8 +239,7 @@ ARCHITECTURE_CONFIGS = {
 
 def get_architecture_config(model_type: str, model_size: str, dataset: str = None) -> Dict[str, Any]:
     """
-    Get the architecture configuration for a specific model type and size,
-    with dataset-aware parameter scaling.
+    Get the architecture configuration for a specific model type and size, with dataset-aware parameter scaling.
     """
     if model_type not in ARCHITECTURE_CONFIGS:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -251,6 +247,7 @@ def get_architecture_config(model_type: str, model_size: str, dataset: str = Non
         raise ValueError(f"Unsupported model size: {model_size}")
     config = copy.deepcopy(ARCHITECTURE_CONFIGS[model_type][model_size])
     return config
+
 
 def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
     """

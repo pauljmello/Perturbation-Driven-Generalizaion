@@ -20,7 +20,7 @@ class BaseMLP(BaseModel):
         super().__init__('mlp', model_size)
 
         config = get_architecture_config('mlp', model_size)
-        self.hidden_dims =  config['hidden_dims']
+        self.hidden_dims = config['hidden_dims']
 
         self.flatten = nn.Flatten()
 

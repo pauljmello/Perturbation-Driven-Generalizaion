@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Union
+from typing import List, Union
 
 import torchvision.transforms as transforms
 
@@ -30,6 +30,7 @@ class AugmentationFactory:
     }
 
     _batch_augs = {'mixup': MixUp, 'cutmix': CutMix, 'augmix': AugMix, 'adversarial': AdversarialNoise}
+    _norm_values = {'mnist': ((0.1307,), (0.3081,)), 'cifar10': ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))}
 
     @classmethod
     def create_augmentation(cls, name: str, intensity: float = 0.5, **kwargs) -> Union[AugmentationBase, BatchAugmentationBase]:
@@ -98,27 +99,24 @@ class AugmentationFactory:
     @classmethod
     def get_transform_from_pipeline(cls, pipeline: AugmentationPipeline, dataset: str) -> transforms.Compose:
         """
-        Convert an augmentation pipeline to a torchvision transform.
+        Convert an augmentation pipeline to a transform.
         """
         if dataset == 'mnist':
-            mean, std = (0.1307,), (0.3081,) # Standard normalization numbers
+            mean, std = (0.1307,), (0.3081,)  # Standard normalization numbers
         elif dataset == 'cifar10':
-            mean, std = (0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616) # Standard normalization numbers
+            mean, std = (0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)  # Standard normalization numbers
         else:
             raise ValueError(f"Unsupported dataset: {dataset}")
         transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(pipeline), transforms.Normalize(mean, std)])
         return transform
 
     @classmethod
-    def create_transform(cls, techniques: Optional[List[str]], intensities: Optional[List[float]], dataset: str) -> transforms.Compose:
+    def create_transform(cls, techniques, intensities, dataset):
         """
-        Create a torchvision transform from augmentation techniques.
+        Create cached transforms from a list of techniques and intensities.
         """
+        mean, std = cls._norm_values.get(dataset, ((0.5,), (0.5,)))
         if not techniques or not intensities:
-            if dataset == 'mnist':
-                return transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-            else:
-                return transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))])
-        # Create pipeline
+            return transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean, std)])
         pipeline = cls.create_pipeline(techniques, intensities)
-        return cls.get_transform_from_pipeline(pipeline, dataset)
+        return transforms.Compose([transforms.ToTensor(), transforms.Lambda(pipeline), transforms.Normalize(mean, std)])

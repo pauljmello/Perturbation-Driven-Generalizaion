@@ -1,22 +1,17 @@
-import logging
-import torch
-import pandas as pd
-from tabulate import tabulate
-import sys
 import argparse
+import logging
 import os
+import sys
+
+import pandas as pd
+import torch
+from tabulate import tabulate
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append('.')
 
-# Import model modules to ensure registration
-from models import mlp, cnn, transformer, vit, vae, unet
 
-from config.architecture_config import (
-    PARAMETER_TARGETS,
-    get_dataset_config,
-    ARCHITECTURE_CONFIGS
-)
+from config.architecture_config import PARAMETER_TARGETS,get_dataset_config
 from config.model_registry import ModelRegistry
 from utils.validators import count_parameters
 from utils import logging_utils
@@ -24,11 +19,7 @@ from utils import logging_utils
 logging_utils.setup_logging(level=logging.INFO)
 logger = logging.getLogger('check_params')
 
-STATUS_SYMBOLS = {
-    "pass": "PASS",
-    "warning": "WARN",
-    "fail": "FAIL"
-}
+STATUS_SYMBOLS = {"pass": "PASS", "warning": "WARN", "fail": "FAIL"}
 
 def create_model_safely(model_type, model_size, input_channels, input_size, num_classes, device):
     """
@@ -64,6 +55,7 @@ def create_model_safely(model_type, model_size, input_channels, input_size, num_
         logger.error(f"Error creating {model_type} {model_size}: {str(e)}")
         return None
 
+
 def check_model_parameters(datasets=None, full_analysis=True):
     """
     Check parameter counts of models against target values and output results to terminal.
@@ -92,7 +84,6 @@ def check_model_parameters(datasets=None, full_analysis=True):
         return None
 
     all_results = {}
-
 
     for dataset_name in datasets:
         logger.info(f"Checking models with {dataset_name} dataset")
@@ -139,40 +130,34 @@ def check_model_parameters(datasets=None, full_analysis=True):
                         'within_range': 95 <= percent <= 105,
                     })
 
-                    # Log result
                     logger.info(f"{dataset_name} - {model_type} {model_size}: {params['total']:,} parameters ({percent:.1f}% of target {target:,})")
 
                 except Exception as e:
                     logger.error(f"Error checking {model_type} {model_size} with {dataset_name}: {str(e)}")
 
-        # Store results for this dataset
+        # Store results
         all_results[dataset_name] = results
 
-    # Process and display results
+    # Process results
     combined_results = []
     for dataset_name, results in all_results.items():
         combined_results.extend(results)
 
-    # Create DataFrame from all results
     df = pd.DataFrame(combined_results)
 
-    # Create a summary for each dataset
+    # Create summary
     for dataset_name in datasets:
         dataset_results = df[df['dataset'] == dataset_name].copy()
 
         # Format for display (using .loc to avoid SettingWithCopyWarning)
-        dataset_results.loc[:, 'Status'] = dataset_results['percent_of_target'].apply(
-            lambda x: STATUS_SYMBOLS["pass"] if 95 <= x <= 105 else
-            (STATUS_SYMBOLS["warning"] if 90 <= x <= 110 else STATUS_SYMBOLS["fail"])
-        )
+        dataset_results.loc[:, 'Status'] = dataset_results['percent_of_target'].apply(lambda x: STATUS_SYMBOLS["pass"]
+            if 95 <= x <= 105 else(STATUS_SYMBOLS["warning"] if 90 <= x <= 110 else STATUS_SYMBOLS["fail"]))
         dataset_results.loc[:, 'Parameters'] = dataset_results['total_params'].apply(lambda x: f"{x:,}")
         dataset_results.loc[:, 'Target'] = dataset_results['target_params'].apply(lambda x: f"{x:,}")
         dataset_results.loc[:, '% of Target'] = dataset_results['percent_of_target'].apply(lambda x: f"{x:.1f}%")
 
         # Sort by model type and size
         dataset_results = dataset_results.sort_values(['model_type', 'model_size'])
-
-        # Select display columns
         display_df = dataset_results[['Status', 'model_type', 'model_size', 'Parameters', 'Target', '% of Target']]
 
         # Generate table

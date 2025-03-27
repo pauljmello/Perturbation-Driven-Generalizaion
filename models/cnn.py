@@ -9,6 +9,7 @@ from models.base import BaseModel
 
 logger = logging.getLogger('models.cnn')
 
+
 class ConvBlock(nn.Module):
     """
     A convolutional block with two conv layers, batch norm, and activation.
@@ -31,7 +32,6 @@ class BaseCNN(BaseModel):
     """
     Base CNN architecture for comparison.
     """
-
     def __init__(self, model_size, input_channels, num_classes):
         """
         Initialize the CNN model.

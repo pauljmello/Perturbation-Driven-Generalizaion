@@ -2,7 +2,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 logger = logging.getLogger('checkpoint')
 
@@ -70,7 +70,7 @@ class CheckpointManager:
                     writer.writeheader()
                 writer.writerow(serialized_result)
 
-            logger.info(f"Checkpoint saved for experiment: {result.get('exp_id', 'unknown')}")
+            logger.info(f"Checkpoint saved")
         except Exception as e:
             logger.error(f"Error saving checkpoint: {str(e)}")
 

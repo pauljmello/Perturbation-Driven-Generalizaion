@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Type, Callable, Set
+from typing import Type, Callable, Set
 
 logger = logging.getLogger('model_registry')
 
@@ -9,13 +9,26 @@ ModelFactory = Callable
 
 class ModelRegistry:
     """
-    Registry of model architectures and factories.
+    Registry with error handling and caching.
     """
+    _model_classes = {}
+    _model_factories = {}
+    _supported_types = set()
+    _supported_sizes = {'small', 'medium', 'large'}
+    _model_cache = {}
 
-    _model_classes: Dict[str, Dict[str, ModelClass]] = {}
-    _model_factories: Dict[str, ModelFactory] = {}
-    _supported_types: Set[str] = set()
-    _supported_sizes: Set[str] = {'small', 'medium', 'large'}
+    @classmethod
+    def get_available_models(cls):
+        """
+        Get all available models efficiently.
+        """
+        if not hasattr(cls, '_available_models_cache'):
+            cls._available_models_cache = [(model_type, model_size)
+                for model_type in cls.get_supported_types()
+                for model_size in cls.get_supported_sizes()
+                if cls.is_model_available(model_type, model_size)
+            ]
+        return cls._available_models_cache
 
     @classmethod
     def register_model_class(cls, model_type: str, model_size: str, model_class: ModelClass) -> None:
@@ -72,10 +85,15 @@ class ModelRegistry:
         return cls._supported_sizes
 
     @classmethod
-    def is_model_available(cls, model_type: str, model_size: str) -> bool:
+    def is_model_available(cls, model_type, model_size):
         """
-        Check if a specific model type and size is available.
+        Check model availability with efficient caching.
         """
-        if model_type not in cls._model_classes:
-            return False
-        return model_size in cls._model_classes[model_type]
+        cache_key = f"{model_type}_{model_size}"
+        if cache_key in cls._model_cache:
+            return cls._model_cache[cache_key]
+
+        result = (model_type in cls._model_classes and
+                  model_size in cls._model_classes.get(model_type, {}))
+        cls._model_cache[cache_key] = result
+        return result

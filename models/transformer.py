@@ -1,4 +1,3 @@
-
 import logging
 import math
 
@@ -10,6 +9,7 @@ from config.model_registry import ModelRegistry
 from models.base import BaseModel
 
 logger = logging.getLogger(__name__)
+
 
 class PositionalEncoding(nn.Module):
     """
@@ -31,7 +31,7 @@ class PositionalEncoding(nn.Module):
 
 class TransformerBlock(nn.Module):
     """
-    Transformer block with attention and MLP.
+    Transformer block with attention and MLP, supporting KV caching.
     """
     def __init__(self, dim, n_heads, mlp_ratio=4.):
         super().__init__()
@@ -47,9 +47,30 @@ class TransformerBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, dim),
         )
 
-    def forward(self, x):
+        # Cache for keys and values
+        self.k_cache = None
+        self.v_cache = None
+
+    def forward(self, x, use_cache=False):
         x_norm = self.norm1(x)
-        attn_out, _ = self.attn(x_norm, x_norm, x_norm)
+
+        # Handle KV caching
+        if use_cache and self.k_cache is not None and self.v_cache is not None:
+            # Only process the current input tokens with cached history
+            attn_out, _ = self.attn(query=x_norm, key=torch.cat([self.k_cache, x_norm], dim=1), value=torch.cat([self.v_cache, x_norm], dim=1))
+
+            # Update cache with current input
+            self.k_cache = torch.cat([self.k_cache, x_norm], dim=1)
+            self.v_cache = torch.cat([self.v_cache, x_norm], dim=1)
+        else:
+            # Standard attention computation
+            attn_out, _ = self.attn(x_norm, x_norm, x_norm)
+
+            # Initialize cache if using caching
+            if use_cache:
+                self.k_cache = x_norm
+                self.v_cache = x_norm
+
         x = x + attn_out
         x = x + self.mlp(self.norm2(x))
         return x
@@ -57,16 +78,15 @@ class TransformerBlock(nn.Module):
 
 class BaseTransformer(BaseModel):
     """
-    Base class for  transformer models with KV caching.
+    Base class for transformer models with KV caching.
     """
-
     def __init__(self, model_size, input_channels, input_size, num_classes):
         """
         Initialize transformer model.
         """
         super().__init__('transformer', model_size)
 
-        # Get architecture configuration
+        # Get architecture config
         config = get_architecture_config('transformer', model_size)
         self.embedding_dim = config['embed_dim']
         self.num_heads = config['heads']
@@ -77,9 +97,9 @@ class BaseTransformer(BaseModel):
         self.input_size = input_size
 
         if self.patch_size > 1:
-            # efficient Patching
+            # Patching
             self.embedding = nn.Conv2d(input_channels, self.embedding_dim, kernel_size=self.patch_size, stride=self.patch_size)
-            # calculate sequence length  with patching
+            # calculate sequence length with patching
             self.seq_length = (input_size // self.patch_size) ** 2
         else:
             # no patching
@@ -90,7 +110,7 @@ class BaseTransformer(BaseModel):
         self.positional_encoding = PositionalEncoding(self.embedding_dim)
 
         # Transformer encoder
-        self.transformer_blocks = nn.ModuleList([TransformerBlock(dim=self.embedding_dim, n_heads=self.num_heads, mlp_ratio=4.0, ) for _ in range(self.num_layers)])
+        self.transformer_blocks = nn.ModuleList([TransformerBlock(dim=self.embedding_dim, n_heads=self.num_heads, mlp_ratio=4.0) for _ in range(self.num_layers)])
 
         self.norm = nn.LayerNorm(self.embedding_dim)
 
@@ -103,8 +123,22 @@ class BaseTransformer(BaseModel):
             nn.Linear(self.embedding_dim, num_classes)
         )
 
-    def forward(self, x):
+    def reset_kv_cache(self):
+        """
+        Reset KV cache for all transformer blocks.
+        """
+        for module in self.modules():
+            if hasattr(module, 'k_cache'):
+                module.k_cache = None
+            if hasattr(module, 'v_cache'):
+                module.v_cache = None
+
+    def forward(self, x, use_cache=False):
         batch_size = x.size(0)
+
+        # Reset cache at the start of a new sequence
+        if not use_cache:
+            self.reset_kv_cache()
 
         if self.patch_size > 1:
             # Patched embedding
@@ -117,12 +151,14 @@ class BaseTransformer(BaseModel):
 
         x = self.positional_encoding(x)
 
+        # Apply transformer blocks
         for block in self.transformer_blocks:
-            x = block(x)
+            x = block(x, use_cache=use_cache)
 
-        x = self.norm(x)
-        x = x.mean(dim=1)
-        x = self.classifier(x)
+        x = self.norm(x) # norm
+        x = x.mean(dim=1) # pool avg
+        x = self.classifier(x) # classifier
+
         return x
 
 

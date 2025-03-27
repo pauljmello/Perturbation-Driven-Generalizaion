@@ -1,449 +1,424 @@
-import logging
-from pathlib import Path
-from typing import Dict, List, Union, Optional, Any, Callable
+import ast
+import json
+import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
-from matplotlib.figure import Figure
 
-logger = logging.getLogger('visualization')
 
-class PlotGenerator:
-    COMPARISON = "comparisons"
-    LEARNING = "learning"
-    AUGMENTATION = "augmentation"
-    HEATMAP = "heatmaps"
-
-    def __init__(self, output_dir: Path):
+class ArchitectureAnalyzer:
+    """
+    Modular analyzer for neural architecture experiments with noise augmentation focus.
+    """
+    def __init__(self, csv_file, output_dir="../z.analysis_plots"):
+        self.csv_file = csv_file
         self.output_dir = output_dir
-        self._init_directories()
-        self.plot_configs = self._default_configs()
+        self.df = None
+        self.baseline_performances = {}
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    def _init_directories(self) -> None:
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        for category in [self.COMPARISON, self.LEARNING, self.AUGMENTATION, self.HEATMAP]:
-            (self.output_dir / category).mkdir(exist_ok=True)
+    def load_data(self):
+        """
+        Load and preprocess the experimental data.
+        """
+        print(f"Reading data from {self.csv_file}")
+        header_lines = self._count_header_lines()
 
-    def _default_configs(self) -> Dict[str, Dict[str, Any]]:
-        return {
-            "general": {
-                "dpi": 300,
-                "title_fontsize": 14,
-                "label_fontsize": 12,
-                "legend_fontsize": 10,
-                "grid_alpha": 0.3,
-            },
-            "comparison": {
-                "figsize": (12, 8),
-                "palette": "muted",
-            },
-            "learning": {
-                "figsize": (10, 6),
-                "line_width": 2,
-                "marker_size": 4,
-            },
-            "augmentation": {
-                "figsize": (14, 8),
-                "bar_width": 0.7,
-                "error_cap_size": 5,
-            },
-            "heatmap": {
-                "figsize": (16, 10),
-                "cmap": "RdYlGn",
-                "annot_format": ".2f",
-            }
-        }
+        expected_columns = ['model_type', 'model_size', 'augmentation_techniques', 'augmentation_intensities', 'augmentation_count', 'random_seed',
+                            'train_loss', 'train_acc', 'val_loss', 'val_acc', 'epoch_times', 'timing', 'throughput', 'test_loss', 'test_acc']
 
-    def _get_path(self, category: str, filename: str) -> Path:
-        return self.output_dir / category / f"{filename}.png"
-
-    def _safe_plot(self, plot_func: Callable, *args, **kwargs) -> Optional[Figure]:
         try:
-            return plot_func(*args, **kwargs)
+            self.df = pd.read_csv(self.csv_file, skiprows=header_lines)
+            print(f"Successfully loaded data with {len(self.df)} rows")
+            if 'model_type' not in self.df.columns and len(self.df.columns) == len(expected_columns):
+                self.df.columns = expected_columns
+                print("Fixed column names based on expected schema")
+            self._process_dataframe()
+            return True
         except Exception as e:
-            logger.error(f"Error generating plot: {str(e)}")
-            return None
+            print(f"Error reading CSV: {e}")
+            return False
 
-    def model_comparison(self,results: pd.DataFrame, metric: str = 'test_acc', filename: str = 'model_comparison') -> Optional[Figure]:
-        def _plot():
-            if results.empty or metric not in results.columns:
-                raise ValueError(f"Missing required data for metric: {metric}")
-
-            results[metric] = pd.to_numeric(results[metric], errors='coerce')
-
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=cfg["comparison"]["figsize"])
-
-            model_perf = results.groupby(['model_type', 'model_size'])[metric].mean().reset_index()
-            sns.barplot(x='model_type', y=metric, hue='model_size', data=model_perf,palette=cfg["comparison"]["palette"], ax=ax)
-
-            # Customize appearance
-            ax.set_title(f'Model Performance Comparison ({metric})', fontsize=cfg["general"]["title_fontsize"])
-            ax.set_xlabel('Model Architecture', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_ylabel(f'{metric.replace("_", " ").title()} (%)', fontsize=cfg["general"]["label_fontsize"])
-            ax.grid(axis='y', linestyle='--', alpha=cfg["general"]["grid_alpha"])
-            ax.legend(title='Model Size', fontsize=cfg["general"]["legend_fontsize"])
-
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.COMPARISON, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
-
-            return fig
-
-        return self._safe_plot(_plot)
-
-    def learning_curves(self,data: Union[pd.DataFrame, Dict], group_by: str = 'model_size', metric: str = 'train_acc', filename: str = 'learning_curves') -> Optional[Figure]:
+    def _count_header_lines(self):
         """
-        Plot learning curves grouped by model.
+        Count header comment lines in the CSV file.
         """
-        def _plot():
-            cfg = self.plot_configs
-            df = data if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
+        header_lines = 0
+        with open(self.csv_file, 'r') as f:
+            for line in f:
+                if line.startswith('#') or line.strip() == '':
+                    header_lines += 1
+                else:
+                    break
+        return header_lines
 
-            if df.empty or group_by not in df.columns:
-                raise ValueError(f"Missing required grouping column: {group_by}")
-
-            group_values = sorted(df[group_by].unique())
-            figure_objects = []
-
-            for group_val in group_values:
-                fig, ax = plt.subplots(figsize=cfg["learning"]["figsize"])
-                group_data = df[df[group_by] == group_val]
-
-                # For each item in the group, plot learning curve
-                for idx, row in group_data.iterrows():
-                    if metric in row and isinstance(row[metric], (list, tuple)) and len(row[metric]) > 0:
-                        epochs = range(1, len(row[metric]) + 1)
-                        label = f"{row.get('model_type', '')}" if group_by == 'model_size' else f"{row.get('model_size', '')}"
-                        ax.plot(epochs, row[metric], marker='o', linewidth=cfg["learning"]["line_width"], markersize=cfg["learning"]["marker_size"], label=label)
-
-                if len(ax.get_lines()) > 0:
-                    ax.set_title(f"Learning Curves for {group_val.capitalize()} Models", fontsize=cfg["general"]["title_fontsize"])
-                    ax.set_xlabel("Epoch", fontsize=cfg["general"]["label_fontsize"])
-                    ax.set_ylabel(f"{metric.replace('_', ' ').title()} (%)", fontsize=cfg["general"]["label_fontsize"])
-                    ax.grid(True, alpha=cfg["general"]["grid_alpha"])
-                    ax.legend(fontsize=cfg["general"]["legend_fontsize"])
-
-                    output_path = self._get_path(self.LEARNING, f"{filename}_{group_val}")
-                    plt.savefig(output_path, dpi=cfg["general"]["dpi"])
-                    figure_objects.append(fig)
-
-                plt.close()
-
-            return figure_objects
-
-        return self._safe_plot(_plot)
-
-    def augmentation_effects(self,results: pd.DataFrame, metric: str = 'test_acc', filename: str = 'augmentation_effects') -> Optional[Figure]:
+    def _process_dataframe(self):
         """
-        Visualize augmentation techniques results.
+        Process the dataframe to prepare for analysis.
         """
-        def _plot():
-            if results.empty or 'augmentation_techniques' not in results.columns or metric not in results.columns:
-                raise ValueError("Missing required columns for augmentation effects plot")
+        # Process list and JSON columns
+        for col in ['train_acc', 'val_acc', 'train_loss', 'val_loss', 'epoch_times']:
+            if col in self.df.columns:
+                self.df[col] = self.df[col].apply(self._parse_list)
 
-            results[metric] = pd.to_numeric(results[metric], errors='coerce')
+        for col in ['timing', 'throughput']:
+            if col in self.df.columns:
+                self.df[col] = self.df[col].apply(self._parse_json)
 
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=cfg["augmentation"]["figsize"])
+        # Extract metrics
+        for col in ['train_acc', 'val_acc']:
+            if col in self.df.columns:
+                self.df[f'final_{col}'] = self.df[col].apply(
+                    lambda x: x[-1] if isinstance(x, list) and len(x) > 0 else None)
 
-            # baseline
-            baseline = results[results['augmentation_techniques'] == 'None'][metric]
-            if len(baseline) == 0:
-                raise ValueError("No baseline (no augmentation) data available")
-            baseline_mean = baseline.mean()
+        # Create augmentation combo
+        if all(c in self.df.columns for c in ['augmentation_techniques', 'augmentation_intensities']):
+            self.df['aug_combo'] = self.df.apply(lambda row: self._combine_aug_info(row['augmentation_techniques'], row['augmentation_intensities']), axis=1)
+            self.df['has_augmentation'] = self.df['augmentation_techniques'].apply(lambda x: not (pd.isna(x) or str(x).lower() in ['none', 'nan', '']))
 
-            # aug
-            aug_data = results[results['augmentation_techniques'] != 'None']
-            if len(aug_data) == 0:
-                raise ValueError("No augmentation data available besides baseline")
+            self._calculate_baseline_performances()
+            self._calculate_augmentation_effect()
 
-            # Add baseline
-            ax.axhline(y=baseline_mean, color='r', linestyle='--', label=f'Baseline (no augmentation): {baseline_mean:.2f}%')
+        print("Data processing complete")
 
-            # Customize appearance
-            ax.set_title(f'Effect of Augmentation Techniques on {metric.replace("_", " ").title()}', fontsize=cfg["general"]["title_fontsize"])
-            ax.set_xlabel('Augmentation Technique', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_ylabel(f'{metric.replace("_", " ").title()} (%)', fontsize=cfg["general"]["label_fontsize"])
-            ax.tick_params(axis='x', rotation=45, labelsize=cfg["general"]["label_fontsize"])
-            ax.grid(axis='y', linestyle='--', alpha=cfg["general"]["grid_alpha"])
-            ax.legend(fontsize=cfg["general"]["legend_fontsize"])
-
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.AUGMENTATION, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
-
-            return fig
-
-        return self._safe_plot(_plot)
-
-    def augmentation_heatmap(self,results: pd.DataFrame, metric: str = 'test_acc', filename: str = 'augmentation_heatmap') -> Optional[Figure]:
+    def _parse_list(self, value):
         """
-        Create heatmap of augmentation effectiveness by model type.
+        Parse string representation of lists into actual Python lists.
         """
-        def _plot():
-            required_cols = ['model_type', 'augmentation_techniques', metric]
-            if results.empty or not all(col in results.columns for col in required_cols):
-                raise ValueError(f"Missing required columns: {required_cols}")
+        if pd.isna(value) or not isinstance(value, str):
+            return [] if pd.isna(value) else value
+        try:
+            if '[' in value and ']' in value:
+                return ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            pass
+        return []
 
-            results[metric] = pd.to_numeric(results[metric], errors='coerce')
-
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=cfg["heatmap"]["figsize"])
-
-            baseline_df = results[results['augmentation_techniques'] == 'None']
-            if len(baseline_df) == 0:
-                raise ValueError("No baseline (no augmentation) data available")
-
-            baseline_by_model = baseline_df.groupby('model_type')[metric].mean().reset_index()
-            baseline_by_model.columns = ['model_type', 'baseline']
-
-            aug_df = results[results['augmentation_techniques'] != 'None'].copy()
-            if len(aug_df) == 0:
-                raise ValueError("No augmentation data available besides baseline")
-
-            # Merge baseline
-            aug_df = aug_df.merge(baseline_by_model, on='model_type', how='left')
-            aug_df['improvement'] = aug_df[metric] - aug_df['baseline']
-
-            # Group heatmap
-            avg_improvement = aug_df.groupby(['model_type', 'augmentation_techniques'])['improvement'].mean().reset_index()
-            heatmap_data = avg_improvement.pivot(index='model_type', columns='augmentation_techniques', values='improvement')
-
-            # Create visualization
-            sns.heatmap(heatmap_data, annot=True, fmt=cfg["heatmap"]["annot_format"], cmap=cfg["heatmap"]["cmap"], center=0, ax=ax, cbar_kws={'label': 'Improvement over Baseline (%)'})
-            ax.set_title('Improvement in Performance by Augmentation Technique and Model Type',fontsize=cfg["general"]["title_fontsize"])
-            ax.set_ylabel('Model Type', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_xlabel('Augmentation Technique', fontsize=cfg["general"]["label_fontsize"])
-
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.HEATMAP, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
-
-            return fig
-
-        return self._safe_plot(_plot)
-
-    def visualize_augmentations(self, dataset_name: str, techniques: List[str], num_samples: int = 4, intensities: List[float] = None) -> Figure | None:
+    def _parse_json(self, value):
         """
-        Visualize effect of augmentation techniques on sample images.
+        Parse JSON strings into dictionaries.
         """
-        def _plot():
-            import torch
-            import torchvision
-            from augmentation.factory import AugmentationFactory
+        if pd.isna(value) or not isinstance(value, str):
+            return {} if pd.isna(value) else value
+        try:
+            if value.startswith('{') and value.endswith('}'):
+                return json.loads(value)
+        except (ValueError, SyntaxError):
+            pass
+        return {}
 
-            cfg = self.plot_configs
+    def _combine_aug_info(self, techniques, intensities):
+        """
+        Combine augmentation techniques and intensities into a readable format.
+        """
+        if pd.isna(techniques) or techniques == 'None' or techniques == 'none':
+            return 'No Augmentation'
 
-            # Create directory
-            aug_dir = self.output_dir / 'augmentation_samples'
-            aug_dir.mkdir(exist_ok=True)
+        if pd.isna(intensities):
+            return str(techniques)
+        try:
+            tech_list = ast.literal_eval(techniques) if isinstance(techniques, str) else techniques
+            int_list = ast.literal_eval(intensities) if isinstance(intensities, str) else intensities
+            combos = [f"{tech_list[i]}({int_list[i]})" for i in range(min(len(tech_list), len(int_list)))]
+            return '+'.join(combos)
+        except:
+            return f"{techniques}@{intensities}"
 
-            # Load samples
+    def _calculate_baseline_performances(self):
+        """
+        Calculate baseline performances for each model type and size.
+        """
+        baseline_df = self.df[~self.df['has_augmentation']]
+        for _, row in baseline_df.iterrows():
+            model_key = (row['model_type'], row['model_size'])
+            if 'final_val_acc' in row and not pd.isna(row['final_val_acc']):
+                self.baseline_performances[model_key] = row['final_val_acc']
+
+    def _calculate_augmentation_effect(self):
+        """
+        Calculate the effect of augmentations relative to baseline performance.
+        """
+        self.df['aug_improvement'] = np.nan
+        aug_df = self.df[self.df['has_augmentation']]
+        for idx, row in aug_df.iterrows():
+            model_key = (row['model_type'], row['model_size'])
+            if model_key in self.baseline_performances and 'final_val_acc' in row and not pd.isna(row['final_val_acc']):
+                baseline_acc = self.baseline_performances[model_key]
+                aug_effect = row['final_val_acc'] - baseline_acc
+                self.df.at[idx, 'aug_improvement'] = aug_effect
+
+    def generate_plots(self):
+        """
+        Generate all analysis plots.
+        """
+        plots = {"noise_augmentation_effectiveness": self.plot_noise_augmentation, "top_augmented_runs": self.plot_top_augmented_runs, "augmentation_size_comparison": self.plot_augmentation_size_comparison,
+                 "comprehensive_comparison": self.plot_comprehensive_comparison, "training_efficiency": self.plot_training_efficiency}
+        for plot_name, plot_func in plots.items():
             try:
-                if dataset_name == 'mnist':
-                    dataset = torchvision.datasets.MNIST('./data', train=True, download=True)
-                else:  # cifar10
-                    dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True)
+                plot_func()
             except Exception as e:
-                raise RuntimeError(f"Failed to load dataset: {str(e)}")
+                print(f"Error generating {plot_name} plot: {e}")
 
-            sample_indices = list(range(0, num_samples * 10, 10))[:num_samples]
-            samples = [dataset[i][0] for i in sample_indices]
-
-            figure_objects = []
-
-            for technique in techniques:
-                if technique in ['mixup', 'cutmix', 'adversarial']:
-                    continue
-
-                fig, axs = plt.subplots(len(samples), len(intensities), figsize=(3*len(intensities), 3*len(samples)))
-                fig.suptitle(f"Effect of {technique} Augmentation", fontsize=16)
-
-                for i, intensity in enumerate(intensities):
-                    aug = AugmentationFactory.create_augmentation(technique, intensity)
-
-                    for j, sample in enumerate(samples):
-                        ax = axs[j, i] if len(samples) > 1 else axs[i]
-
-                        if not isinstance(sample, torch.Tensor):
-                            to_tensor = torchvision.transforms.ToTensor()
-                            sample = to_tensor(sample)
-
-                        # Apply augmentation
-                        augmented = aug(sample.clone())
-
-                        # Display image
-                        if dataset_name == 'mnist':
-                            ax.imshow(augmented.squeeze().numpy(), cmap='gray')
-                        else:
-                            ax.imshow(augmented.permute(1, 2, 0).numpy())
-
-                        ax.set_title(f"Intensity: {intensity}", fontsize=10)
-                        ax.axis('off')
-
-                plt.tight_layout()
-                plt.savefig(aug_dir / f"{technique}_samples.png", dpi=cfg["general"]["dpi"])
-                figure_objects.append(fig)
-                plt.close()
-
-            return figure_objects
-
-        return self._safe_plot(_plot)
-
-    def generate_standard_plots(self, results_df: pd.DataFrame) -> None:
+    def plot_noise_augmentation(self):
         """
-        Generate all standard plots from experimental results with support for combination experiments.
+        Create a heatmap showing the effectiveness of noise augmentations across intensities.
         """
-        if results_df.empty:
-            logger.warning("Cannot generate plots: empty results DataFrame")
+        if 'augmentation_techniques' not in self.df.columns or 'aug_improvement' not in self.df.columns:
+            print("Missing required columns for noise augmentation analysis")
             return
 
-        for col in ['test_acc', 'val_acc', 'train_acc', 'test_loss', 'val_loss', 'train_loss']:
-            if col in results_df.columns:
-                results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
+        # Filter to noise-based augmentations
+        noise_augs = ['gaussian_noise', 'salt_pepper', 'adversarial']
+        noise_df = self.df[self.df['augmentation_techniques'].apply(lambda x: any(aug in str(x) for aug in noise_augs) if not pd.isna(x) else False)].copy()
 
-        if 'augmentation_count' not in results_df.columns:
-            results_df['augmentation_count'] = results_df['augmentation_techniques'].apply(
-                lambda x: 0 if x == 'None' or pd.isna(x) else len(str(x).split(',')))
+        if len(noise_df) == 0:
+            print("No noise augmentation data found")
+            return
 
-        # Create comparison plots by model
-        self.model_comparison(results_df, 'test_acc', 'model_comparison_test')
-        self.model_comparison(results_df, 'val_acc', 'model_comparison_val')
+        # Extract augmentation and intensity
+        noise_df['noise_aug_info'] = noise_df.apply(lambda row: self._extract_noise_augmentation(row, noise_augs), axis=1)
+        noise_df = noise_df.dropna(subset=['noise_aug_info'])
 
-        # Create augmentation count effect plots
-        self._plot_augmentation_count_effect(results_df, 'test_acc', 'augmentation_count_effect_test')
-        self._plot_augmentation_count_effect(results_df, 'val_acc', 'augmentation_count_effect_val')
+        if len(noise_df) == 0:
+            print("Could not extract noise augmentation information")
+            return
 
-        # Plot learning curves by model
-        self.learning_curves(results_df, 'model_size', 'train_acc', 'learning_curves_by_size')
-        self.learning_curves(results_df, 'model_type', 'train_acc', 'learning_curves_by_type')
+        # Split augmentation and intensity
+        noise_df['noise_aug'] = noise_df['noise_aug_info'].apply(lambda x: x[0] if x else None)
+        noise_df['noise_intensity'] = noise_df['noise_aug_info'].apply(lambda x: x[1] if x and len(x) > 1 else None)
 
-        single_aug_df = results_df[results_df['augmentation_count'] == 1].copy()
-        if not single_aug_df.empty:
-            self.augmentation_effects(single_aug_df, 'test_acc', 'single_augmentation_effects_test')
-            self.augmentation_effects(single_aug_df, 'val_acc', 'single_augmentation_effects_val')
-            self.augmentation_heatmap(single_aug_df, 'test_acc', 'single_augmentation_heatmap_test')
+        grouped = noise_df.groupby(['model_type', 'noise_aug', 'noise_intensity'])['aug_improvement'].mean().reset_index()
+        pivot_df = grouped.pivot_table(values='aug_improvement', index=['model_type', 'noise_aug'], columns='noise_intensity', aggfunc='mean')
 
-            if 'augmentation_intensities' in single_aug_df.columns:
-                single_aug_df['intensity'] = single_aug_df['augmentation_intensities'].apply(
-                    lambda x: float(x) if not pd.isna(x) else 0.0)
-                self.intensity_effect_plot(single_aug_df, 'test_acc', 'single_intensity_effect_test')
+        self._plot_heatmap(pivot_df,"Noise Augmentation Effectiveness by Intensity","noise_augmentation_effectiveness.png", cmap='RdBu_r', center=0, cbar_label='Validation Accuracy Improvement (pp)')
 
-        self._plot_combination_effect_by_model(results_df, 'test_acc', 'combination_effect_by_model_test')
-
-        logger.info(f"Generated standard plots in {self.output_dir}")
-
-    def _plot_augmentation_count_effect(self, results_df, metric, filename):
+    def _extract_noise_augmentation(self, row, noise_augs):
         """
-        Plot effect of augmentation count on performance.
+        Extract noise augmentation type and intensity from a row.
         """
-        try:
-            count_perf = results_df.groupby('augmentation_count')[metric].agg(['mean', 'std']).reset_index()
-
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=(10, 6))
-
-            ax.bar(count_perf['augmentation_count'], count_perf['mean'],
-                   yerr=count_perf['std'], capsize=5, alpha=0.7)
-
-            for count, mean, std in zip(count_perf['augmentation_count'], count_perf['mean'], count_perf['std']):
-                ax.text(count, mean + std + 0.5, f"{mean:.2f}%", ha='center', va='bottom', fontsize=cfg["general"]["label_fontsize"] - 2)
-
-            ax.set_title(f'Effect of Augmentation Combination Size on {metric.replace("_", " ").title()}', fontsize=cfg["general"]["title_fontsize"])
-            ax.set_xlabel('Number of Combined Augmentations', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_ylabel(f'{metric.replace("_", " ").title()} (%)', fontsize=cfg["general"]["label_fontsize"])
-            ax.grid(axis='y', alpha=cfg["general"]["grid_alpha"])
-            ax.set_xticks(count_perf['augmentation_count'])
-
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.COMPARISON, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
-
-            return fig
-        except Exception as e:
-            logger.error(f"Error generating augmentation count effect plot: {str(e)}")
+        if pd.isna(row['augmentation_techniques']):
             return None
 
-    def _plot_combination_effect_by_model(self, results_df, metric, filename):
-        """
-        Plot effect of augmentation combinations by model type.
-        """
         try:
-            if results_df.empty or 'model_type' not in results_df.columns or 'augmentation_count' not in results_df.columns:
-                return None
+            augs = ast.literal_eval(row['augmentation_techniques']) if isinstance(row['augmentation_techniques'], str) else row['augmentation_techniques']
+            ints = ast.literal_eval(row['augmentation_intensities']) if isinstance(row['augmentation_intensities'], str) else row['augmentation_intensities']
 
-            baseline_df = results_df[results_df['augmentation_count'] == 0]
+            for i, aug in enumerate(augs):
+                if any(noise in aug for noise in noise_augs):
+                    return (aug, ints[i] if i < len(ints) else None)
+        except:
+            pass
+        return None
 
-            if baseline_df.empty:
-                return None
-
-            baseline_by_model = baseline_df.groupby('model_type')[metric].mean().reset_index()
-            baseline_by_model.columns = ['model_type', 'baseline']
-
-            aug_df = results_df[results_df['augmentation_count'] > 0].copy()
-
-            if aug_df.empty:
-                return None
-
-            aug_df = aug_df.merge(baseline_by_model, on='model_type', how='left')
-            aug_df['improvement'] = aug_df[metric] - aug_df['baseline']
-
-            model_count_perf = aug_df.groupby(['model_type', 'augmentation_count'])['improvement'].mean().reset_index()
-
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=(12, 8))
-            sns.barplot(x='model_type', y='improvement', hue='augmentation_count', data=model_count_perf, ax=ax)
-            ax.set_title(f'Effect of Augmentation Combinations by Model Type ({metric.replace("_", " ").title()})', fontsize=cfg["general"]["title_fontsize"])
-            ax.set_xlabel('Model Type', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_ylabel(f'Improvement over Baseline (%)', fontsize=cfg["general"]["label_fontsize"])
-            ax.grid(axis='y', alpha=cfg["general"]["grid_alpha"])
-            ax.legend(title='Augmentation Count', fontsize=cfg["general"]["legend_fontsize"])
-
-            ax.axhline(y=0, color='r', linestyle='--', alpha=0.7)
-
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.COMPARISON, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
-
-            return fig
-        except Exception as e:
-            logger.error(f"Error generating combination effect by model plot: {str(e)}")
-            return None
-
-    def intensity_effect_plot(self, results: pd.DataFrame, metric: str = 'test_acc', filename: str = 'intensity_effect') -> Optional[Figure]:
+    def plot_top_augmented_runs(self, top_n=20):
         """
-        Visualize effect of different intensities for each augmentation technique.
+        Plot the top N training runs with augmentations, showing their accuracy curves.
         """
-        def _plot():
-            if results.empty or 'augmentation_technique' not in results.columns or 'augmentation_intensity' not in results.columns or metric not in results.columns:
-                raise ValueError("Missing required columns for intensity effect plot")
+        if 'train_acc' not in self.df.columns or 'aug_combo' not in self.df.columns:
+            print("Missing required columns for top augmented runs analysis")
+            return
 
-            results[metric] = pd.to_numeric(results[metric], errors='coerce')
+        aug_df = self.df[self.df['has_augmentation']].copy()
+        if len(aug_df) == 0:
+            print("No augmented runs found in the dataset")
+            return
 
-            cfg = self.plot_configs
-            fig, ax = plt.subplots(figsize=cfg["learning"]["figsize"])
-            grouped_data = results.groupby(['augmentation_technique', 'augmentation_intensity'])[metric].mean().reset_index()
+        # Sort by validation acc
+        top_runs = aug_df.sort_values('final_val_acc', ascending=False).head(top_n)
+        plt.figure(figsize=(16, 10))
 
-            # Plot intensity  vs.  performance for each augmentation
-            for technique, data in grouped_data.groupby('augmentation_technique'):
-                ax.plot(data['augmentation_intensity'], data[metric], marker='o', linewidth=cfg["learning"]["line_width"], markersize=cfg["learning"]["marker_size"], label=technique)
+        n_colors = len(top_runs['model_type'].unique())
+        color_palette = plt.cm.viridis(np.linspace(0, 0.9, n_colors))
+        color_map = dict(zip(sorted(top_runs['model_type'].unique()), color_palette))
+        line_styles = {'small': '-', 'medium': '--', 'large': '-.'}
 
-            if 'None' in results['augmentation_technique'].values:
-                baseline = results[results['augmentation_technique'] == 'None'][metric].mean()
-                ax.axhline(y=baseline, color='r', linestyle='--', label=f'Baseline (no augmentation): {baseline:.2f}%')
+        # Plot training acc
+        for idx, row in top_runs.iterrows():
+            if isinstance(row['train_acc'], list) and len(row['train_acc']) > 0:
+                epochs = range(1, len(row['train_acc']) + 1)
+                label = f"{row['model_type']}_{row['model_size']} ({row['aug_combo']})"
 
-            ax.set_title(f'Effect of Augmentation Intensity on {metric.replace("_", " ").title()}', fontsize=cfg["general"]["title_fontsize"])
-            ax.set_xlabel('Augmentation Intensity', fontsize=cfg["general"]["label_fontsize"])
-            ax.set_ylabel(f'{metric.replace("_", " ").title()} (%)', fontsize=cfg["general"]["label_fontsize"])
-            ax.grid(axis='y', linestyle='--', alpha=cfg["general"]["grid_alpha"])
-            ax.legend(fontsize=cfg["general"]["legend_fontsize"])
+                plt.plot(epochs, row['train_acc'], label=label, color=color_map.get(row['model_type'], 'black'), linestyle=line_styles.get(row['model_size'], '-'), marker='o', markersize=4)
 
-            plt.tight_layout()
-            plt.savefig(self._get_path(self.AUGMENTATION, filename), dpi=cfg["general"]["dpi"])
-            plt.close()
+        plt.title("Top 20 Augmented Training Runs: Training Accuracy Over Time", fontsize=16)
+        plt.xlabel("Epoch", fontsize=14)
+        plt.ylabel("Training Accuracy (%)", fontsize=14)
+        plt.grid(True, alpha=0.3)
+        plt.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=2, frameon=True, fancybox=True, shadow=True)
 
-            return fig
+        plt.tight_layout()
 
-        return self._safe_plot(_plot)
+        filename = os.path.join(self.output_dir, "top_augmented_runs.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Saved {filename}")
+        plt.close()
+
+    def plot_augmentation_size_comparison(self):
+        """
+        Compare how the same augmentations perform across different model sizes.
+        """
+        if 'aug_combo' not in self.df.columns or 'final_val_acc' not in self.df.columns:
+            print("Missing required columns for augmentation-size comparison")
+            return
+
+        # Get aug combos
+        aug_counts = self.df['aug_combo'].value_counts()
+        common_augs = aug_counts[aug_counts >= 3].index.tolist()
+
+        if len(common_augs) == 0:
+            print("No common augmentation combinations found")
+            return
+
+        # Limiter
+        top_augs = common_augs[:min(6, len(common_augs))]
+        plot_df = self.df[self.df['aug_combo'].isin(top_augs)].copy()
+
+        if len(plot_df) == 0:
+            print("No data available for common augmentations")
+            return
+
+        # Create grid
+        n_augs = len(top_augs)
+        n_cols = min(3, n_augs)
+        n_rows = (n_augs + n_cols - 1) // n_cols
+
+        fig = plt.figure(figsize=(15, 4 * n_rows))
+
+        for i, aug in enumerate(top_augs):
+            ax = fig.add_subplot(n_rows, n_cols, i + 1)
+
+            aug_data = plot_df[plot_df['aug_combo'] == aug]
+
+            pivoted = aug_data.pivot_table(values='final_val_acc', index='model_type', columns='model_size', aggfunc='mean')
+            pivoted.plot(kind='bar', ax=ax)
+
+            ax.set_title(f"Augmentation: {aug}", fontsize=12)
+            ax.set_ylabel("Validation Accuracy (%)", fontsize=10)
+            ax.tick_params(axis='x', rotation=45)
+            ax.grid(axis='y', alpha=0.3)
+
+            # Add labels
+            for container in ax.containers:
+                ax.bar_label(container, fmt='%.1f', fontsize=8)
+
+        plt.suptitle("Performance Comparison Across Model Sizes with Same Augmentations", fontsize=16)
+        plt.tight_layout()
+
+        filename = os.path.join(self.output_dir, "augmentation_size_comparison.png")
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Saved {filename}")
+        plt.close()
+
+    def plot_comprehensive_comparison(self):
+        """
+        Create a comprehensive comparison matrix across model types, sizes and augmentations.
+        """
+        if not {'model_type', 'model_size', 'aug_combo', 'final_val_acc'}.issubset(self.df.columns):
+            print("Missing required columns for comprehensive comparison matrix")
+            return
+
+        pivot_df = self.df.pivot_table(values='final_val_acc', index=['model_type', 'model_size'], columns='aug_combo', aggfunc='mean')
+
+        # Handle large matrices
+        if pivot_df.shape[1] > 8:
+            col_means = pivot_df.mean()
+            baseline_col = 'No Augmentation' if 'No Augmentation' in pivot_df.columns else None
+
+            # Select top augs
+            top_cols = col_means.sort_values(ascending=False).head(7).index.tolist()
+            if baseline_col and baseline_col not in top_cols:
+                top_cols.append(baseline_col)
+
+            pivot_df = pivot_df[top_cols]
+
+        height_per_row = 0.5
+        fig_height = max(8, len(pivot_df) * height_per_row)
+
+        self._plot_heatmap(pivot_df,"Comprehensive Performance Matrix: Architecture × Size × Augmentation",
+                           "comprehensive_comparison.png", figsize=(14, fig_height), cmap='viridis', cbar_label='Validation Accuracy (%)')
+
+    def plot_training_efficiency(self):
+        """
+        Analyze training speed vs. validation accuracy.
+        """
+        if 'epoch_times' not in self.df.columns or 'final_val_acc' not in self.df.columns:
+            print("Missing required columns for training efficiency analysis")
+            return
+
+        self.df['avg_epoch_time'] = self.df['epoch_times'].apply(
+            lambda x: sum(x) / len(x) if isinstance(x, list) and len(x) > 0 else np.nan)
+
+        plot_df = self.df.dropna(subset=['avg_epoch_time', 'final_val_acc'])
+
+        if len(plot_df) == 0:
+            print("No valid data for training efficiency plot")
+            return
+
+        plt.figure(figsize=(12, 8))
+
+        # Create scatter plot
+        model_types = plot_df['model_type'].unique()
+        colors = plt.cm.tab10(np.linspace(0, 1, len(model_types)))
+        markers = {'small': 'o', 'medium': 's', 'large': '^'}
+
+        for i, model_type in enumerate(model_types):
+            model_data = plot_df[plot_df['model_type'] == model_type]
+            for size in model_data['model_size'].unique():
+                size_data = model_data[model_data['model_size'] == size]
+                plt.scatter(size_data['avg_epoch_time'], size_data['final_val_acc'], label=f"{model_type.upper()} {size}", color=colors[i], marker=markers.get(size, 'o'), s=100, alpha=0.7)
+
+        plt.title("Training Efficiency: Speed vs. Accuracy", fontsize=14)
+        plt.xlabel("Average Time per Epoch (seconds)", fontsize=12)
+        plt.ylabel("Final Validation Accuracy (%)", fontsize=12)
+        plt.grid(True, alpha=0.3)
+        plt.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        # Add efficiency boundary lines
+        plt.axhline(y=np.percentile(plot_df['final_val_acc'], 75), color='gray', linestyle='--', alpha=0.5)
+        plt.axvline(x=np.percentile(plot_df['avg_epoch_time'], 25), color='gray', linestyle='--', alpha=0.5)
+        plt.tight_layout()
+
+        filename = os.path.join(self.output_dir, "training_efficiency.png")
+        plt.savefig(filename, dpi=300)
+        print(f"Saved {filename}")
+        plt.close()
+
+    def _plot_heatmap(self, data, title, filename, figsize=None, cmap='viridis', center=None, cbar_label=None):
+        """
+        Helper method for creating heatmap plots.
+        """
+        plt.figure(figsize=figsize or (12, 8))
+        ax = sns.heatmap(data, annot=True, fmt=".1f" if 'acc' in cbar_label.lower() else ".2f", cmap=cmap, center=center, linewidths=.5, cbar_kws={'label': cbar_label})
+
+        plt.title(title, fontsize=16)
+        plt.tight_layout()
+
+        output_path = os.path.join(self.output_dir, filename)
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Saved {output_path}")
+        plt.close()
+
+    def run_all_analyses(self):
+        """
+        Run all analysis plots.
+        """
+        if self.load_data():
+            self.generate_plots()
+            print(f"All analyses complete! Results saved to {self.output_dir}/")
+        else:
+            print("Failed to load data. Cannot generate analyses.")
+
+
+def main():
+    """
+    Main function to run all analyses.
+    """
+    csv_file_path = "../results/run_20250322_161910/experiment_checkpoints.csv"
+    analyzer = ArchitectureAnalyzer(csv_file_path)
+    analyzer.run_all_analyses()
+
+
+if __name__ == "__main__":
+    main()

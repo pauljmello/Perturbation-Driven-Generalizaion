@@ -11,9 +11,7 @@ logger = logging.getLogger('models')
 class BaseModel(nn.Module, ABC):
     """
     Base class for all model architectures.
-    Provides common functionality.
     """
-
     def __init__(self, model_type: str, model_size: str):
         """
         Initialize the base model.
@@ -75,12 +73,21 @@ class BaseModel(nn.Module, ABC):
             else:
                 output_shape = tuple(output.shape)
 
-            return {'success': True, 'input_shape': input_shape, 'output_shape': output_shape, 'inference_time': inference_time }
+            return {'success': True, 'input_shape': input_shape, 'output_shape': output_shape, 'inference_time': inference_time}
         except Exception as e:
             logger.error(f"Forward pass failed: {str(e)}")
-            return { 'success': False, 'input_shape': input_shape, 'error': str(e)}
+            return {'success': False, 'input_shape': input_shape, 'error': str(e)}
 
     def reset_parameters(self):
         for module in self.modules():
             if hasattr(module, 'reset_parameters'):
                 module.reset_parameters()
+
+    def reset_model_state(self):
+        """
+        Reset all stateful components in the model.
+        """
+        for module in self.modules():
+            if hasattr(module, 'k_cache') and hasattr(module, 'v_cache'):
+                module.k_cache = None
+                module.v_cache = None

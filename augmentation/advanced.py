@@ -1,7 +1,6 @@
 import numpy as np
 import torch
-from torchvision.transforms import transforms
-
+from torchvision.transforms import RandomAdjustSharpness, RandomAutocontrast, RandomEqualize, GaussianBlur, RandomAffine
 from augmentation.base import BatchAugmentationBase, AugmentationBase
 
 
@@ -12,23 +11,19 @@ class MixUp(BatchAugmentationBase):
     Reference: "mixup: Beyond Empirical Risk Minimization"
     https://arxiv.org/abs/1710.09412
     """
-
     def apply_batch(self, images, targets):
-        """
-        Apply MixUp augmentation to a batch.
-        """
         batch_size = images.size(0)
         device = images.device
 
         if self.alpha > 0:
-            lam = np.random.beta(self.alpha, self.alpha, batch_size)
+            lam = torch.distributions.Beta(self.alpha, self.alpha).sample([batch_size]).to(device)
         else:
-            lam = np.ones(batch_size)
+            lam = torch.ones(batch_size, device=device)
 
         lam = torch.from_numpy(lam).float().to(device)
         lam_expanded = lam.view(-1, 1, 1, 1)
 
-        # Permute batch for  and mix samples
+        # Permute batch for and mix samples
         perm_indices = torch.randperm(batch_size, device=device)
         mixed_images = lam_expanded * images + (1 - lam_expanded) * images[perm_indices]
 
@@ -42,43 +37,36 @@ class CutMix(BatchAugmentationBase):
     Reference: "CutMix: Regularization Strategy to Train Strong Classifiers with Localizable Features"
     https://arxiv.org/abs/1905.04899
     """
-
     def apply_batch(self, images, targets):
-        """
-        Apply CutMix augmentation to a batch.
-        """
         batch_size, _, height, width = images.shape
         device = images.device
 
-        # Sample mixing parameter
         if self.alpha > 0:
-            lam = np.random.beta(self.alpha, self.alpha)
+            lam = torch.distributions.Beta(self.alpha, self.alpha).sample().to(device)
         else:
-            lam = 1.0
+            lam = torch.tensor(1.0, device=device)
 
-        # random dims
-        cut_ratio = np.sqrt(1.0 - lam)
-        cut_w = int(width * cut_ratio)
-        cut_h = int(height * cut_ratio)
+        cut_ratio = torch.sqrt(1.0 - lam)
+        cut_w = int((width * cut_ratio).item())
+        cut_h = int((height * cut_ratio).item())
 
-        cx = np.random.randint(width)
-        cy = np.random.randint(height)
+        cx = torch.randint(width, (1,), device=device).item()
+        cy = torch.randint(height, (1,), device=device).item()
 
-        # Get box coordinates
-        bbx1 = np.clip(cx - cut_w // 2, 0, width)
-        bby1 = np.clip(cy - cut_h // 2, 0, height)
-        bbx2 = np.clip(cx + cut_w // 2, 0, width)
-        bby2 = np.clip(cy + cut_h // 2, 0, height)
+        bbx1 = max(cx - cut_w // 2, 0)
+        bby1 = max(cy - cut_h // 2, 0)
+        bbx2 = min(cx + cut_w // 2, width)
+        bby2 = min(cy + cut_h // 2, height)
 
-        # Permute batch  and make images
+        # Process images
         perm_indices = torch.randperm(batch_size, device=device)
         mixed_images = images.clone()
         mixed_images[:, :, bby1:bby2, bbx1:bbx2] = images[perm_indices, :, bby1:bby2, bbx1:bbx2]
 
-        #  Adjust lambda to reflect box ratio
-        lam = 1.0 - ((bbx2 - bbx1) * (bby2 - bby1) / (width * height))
+        lam_adjusted = 1.0 - ((bbx2 - bbx1) * (bby2 - bby1) / (width * height))
+        lam_tensor = torch.tensor(lam_adjusted, device=device)
 
-        return mixed_images, targets, targets[perm_indices], torch.tensor(lam, device=device)
+        return mixed_images, targets, targets[perm_indices], lam_tensor
 
 
 class AugMix(AugmentationBase):
@@ -88,7 +76,6 @@ class AugMix(AugmentationBase):
     Reference: "AugMix: A Simple Data Processing Method to Improve Robustness and Uncertainty"
     https://arxiv.org/abs/1912.02781
     """
-
     def __init__(self, severity=3, width=3, depth=2):
         """
         Initialize AugMix.
@@ -98,8 +85,8 @@ class AugMix(AugmentationBase):
         self.width = width
         self.depth = depth
 
-        self.aug_ops = [transforms.RandomAdjustSharpness(severity, p=1.0), transforms.RandomAutocontrast(p=1.0), transforms.RandomEqualize(p=1.0),
-                        transforms.GaussianBlur(3, sigma=(0.1, 2.0)), transforms.RandomAffine(degrees=severity * 10, translate=(0.1 * severity, 0.1 * severity)),]
+        self.aug_ops = [RandomAdjustSharpness(severity, p=1.0), RandomAutocontrast(p=1.0), RandomEqualize(p=1.0),
+                        GaussianBlur(3, sigma=(0.1, 2.0)), RandomAffine(degrees=severity * 10, translate=(0.1 * severity, 0.1 * severity)), ]
 
     def apply(self, x):
         """

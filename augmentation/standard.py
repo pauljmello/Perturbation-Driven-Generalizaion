@@ -138,7 +138,6 @@ class GaussianBlur(AugmentationBase):
     """
     Apply Gaussian blur augmentation.
     """
-
     def apply(self, x: torch.Tensor) -> torch.Tensor:
         """
         Apply Gaussian blur augmentation.
@@ -147,7 +146,7 @@ class GaussianBlur(AugmentationBase):
         min_dim = min(h, w)
         # Scale kernel size based on image dimensions and intensity
         kernel_size = int(3 + (min_dim / 32) * 8 * self.intensity)
-        kernel_size = max(3, min(kernel_size, 11))  # Ensure kernel size is between 3 and 11
+        kernel_size = max(3, min(kernel_size, 11))
         if kernel_size % 2 == 0:
             kernel_size += 1  # Ensure kernel size is odd
         sigma = self.intensity * 2

@@ -13,7 +13,6 @@ class MetricsTracker:
     """
     Track and compute metrics during training and evaluation.
     """
-
     def __init__(self, metrics: Optional[List[str]] = None):
         """
         Initialize metrics tracker.
@@ -21,8 +20,6 @@ class MetricsTracker:
         self.metrics = metrics or ['accuracy', 'loss']
         self.history = {metric: [] for metric in self.metrics}
         self.epoch_metrics = {metric: [] for metric in self.metrics}
-
-        # Register metrics
         self.metric_functions = {'accuracy': self.accuracy, 'loss': self.loss, 'precision': self.precision, 'recall': self.recall, 'f1': self.f1}
 
     def reset(self) -> None:

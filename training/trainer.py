@@ -12,12 +12,14 @@ from models.base import BaseModel
 
 logger = logging.getLogger('trainer')
 
+
 def mixup_criterion(criterion, pred, y_a, y_b, lam):
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
+
 class ModelTrainer:
     """
-    Unified trainer for all model architectures.
+    Unified trainer.
     """
     def __init__(self, model: BaseModel, train_loader, val_loader, test_loader, device: torch.device, model_dir, exp_id: str, augmentations=None, augmentation_intensities=None, callbacks=None, save_intermediate: bool = False):
         """
@@ -123,7 +125,7 @@ class ModelTrainer:
 
     def _track_vae_losses(self, outputs, inputs):
         """
-        Track VAE auxiliary losses for monitoring but not for optimization.
+        Track VAE auxiliary losses for monitoring.
         """
         _, x_recon, mu, log_var = outputs[:4]
 
@@ -140,19 +142,18 @@ class ModelTrainer:
 
     def train_epoch(self, epoch: int):
         """
-        Train the model for one epoch.
+        Training loop with reduced memory usage.
         """
         self.model.train()
-        total_loss = 0.0
-        correct = 0
-        total = 0
+        total_loss = torch.tensor(0.0, device=self.device)
+        correct = torch.tensor(0, device=self.device)
+        total = torch.tensor(0, device=self.device)
         start_time = time.time()
+        iterator = self.train_loader
 
-        for batch_idx, (inputs, targets) in enumerate(self.train_loader):
-            inputs = inputs.to(self.device, non_blocking=True)
-            targets = targets.to(self.device, non_blocking=True)
-
-            # Apply batch augmentation
+        for inputs, targets in iterator:
+            inputs = inputs.to(self.device)
+            targets = targets.to(self.device)
             if self.batch_augs:
                 batch_aug = random.choice(self.batch_augs)
                 inputs, targets_a, targets_b, lam = batch_aug.apply_batch(inputs, targets)
@@ -160,39 +161,42 @@ class ModelTrainer:
                 targets_a = targets_b = targets
                 lam = 1.0
 
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
             outputs = self.model(inputs)
-
             loss = self.calculate_loss(outputs=outputs, inputs=inputs, targets=targets, targets_a=targets_a, targets_b=targets_b, lam=lam)
 
             loss.backward()
             self.optimizer.step()
 
-            total_loss += loss.item()
+            total_loss += loss
 
-            if isinstance(outputs, tuple) and len(outputs) >= 4:
-                pred = outputs[0]  # y_pred for VAE models
+            if isinstance(outputs, tuple) and len(outputs) >= 1:
+                pred = outputs[0]
             else:
                 pred = outputs
 
-            _, predicted = pred.max(1)
-            correct += predicted.eq(targets).sum().item()
-            total += targets.size(0)
+            with torch.no_grad():
+                _, predicted = pred.max(1)
+                correct += (predicted == targets).sum().item()
+                total += targets.size(0)
 
+        # Calculate metrics
         epoch_time = time.time() - start_time
-        accuracy = 100.0 * correct / total
+        batch_count = torch.tensor(len(self.train_loader), device=self.device)
+        avg_loss = (total_loss / batch_count).item()
+        accuracy = (100.0 * correct / total).item()
 
-        return {'loss': total_loss / len(self.train_loader), 'acc': accuracy, 'epoch_time': epoch_time}
+        return {'loss': avg_loss, 'acc': accuracy, 'epoch_time': epoch_time}
 
     def evaluate(self, data_loader):
         self.model.eval()
-        total_loss = 0.0
-        correct = 0
-        total = 0
+        total_loss = torch.tensor(0.0, device=self.device)
+        correct = torch.tensor(0, device=self.device)
+        total = torch.tensor(0, device=self.device)
         with torch.no_grad():
             for inputs, targets in data_loader:
-                inputs = inputs.to(self.device, non_blocking=True)
-                targets = targets.to(self.device, non_blocking=True)
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
                 outputs = self.model(inputs)
                 if isinstance(outputs, tuple) and len(outputs) == 4:
                     y_pred, x_recon, mu, log_var = outputs
@@ -206,8 +210,11 @@ class ModelTrainer:
                 _, predicted = pred.max(1)
                 correct += predicted.eq(targets).sum().item()
                 total += targets.size(0)
-        accuracy = 100.0 * correct / total
-        return {'loss': total_loss / len(data_loader),'acc': accuracy}
+        batch_count = torch.tensor(len(self.train_loader), device=self.device)
+        avg_loss = (total_loss / batch_count).item()
+        accuracy = (100.0 * correct / total).item()
+
+        return {'loss': avg_loss, 'acc': accuracy}
 
     def save_checkpoint(self, is_best: bool = False, is_final: bool = False) -> None:
         """
@@ -218,7 +225,7 @@ class ModelTrainer:
             return
 
         checkpoint = {'epoch': len(self.metrics['train_loss']), 'model_state_dict': self.model.state_dict(), 'optimizer_state_dict': self.optimizer.state_dict() if not is_final else None, 'metrics': self.metrics,
-            'best_val_acc': self.best_val_acc, 'best_epoch': self.best_epoch, 'parameter_count': self.model.count_parameters(), 'flops_per_sample': getattr(self.model, 'flops_per_sample', None)}
+                      'best_val_acc': self.best_val_acc, 'best_epoch': self.best_epoch, 'parameter_count': self.model.count_parameters(), 'flops_per_sample': getattr(self.model, 'flops_per_sample', None)}
 
         try:
             if is_final:
@@ -241,7 +248,7 @@ class ModelTrainer:
         except Exception as e:
             logger.error(f"Error saving checkpoint: {str(e)}")
             try:
-                simplified_checkpoint = {'epoch': len(self.metrics['train_loss']),'model_state_dict': self.model.state_dict(), 'best_val_acc': self.best_val_acc}
+                simplified_checkpoint = {'epoch': len(self.metrics['train_loss']), 'model_state_dict': self.model.state_dict(), 'best_val_acc': self.best_val_acc}
                 filepath = self.model_dir / f"{self.exp_id}_simplified.pth"
                 torch.save(simplified_checkpoint, filepath)
                 logger.info(f"Saved simplified checkpoint after error: {filepath}")
@@ -254,7 +261,7 @@ class ModelTrainer:
             if hasattr(callback, 'on_train_begin'):
                 callback.on_train_begin()
 
-        self.metrics['timing'] = { 'initial_validation_time': 0.0, 'training_time': 0.0, 'validation_time': 0.0,  'test_time': 0.0,  'total_time': 0.0,  'per_epoch': []}
+        self.metrics['timing'] = {'initial_validation_time': 0.0, 'training_time': 0.0, 'validation_time': 0.0, 'test_time': 0.0, 'total_time': 0.0, 'per_epoch': []}
 
         logger.info(f"Evaluating initial model performance for {self.exp_id}")
         init_val_start = time.time()
@@ -262,6 +269,40 @@ class ModelTrainer:
         init_val_time = time.time() - init_val_start
         self.metrics['timing']['initial_validation_time'] = init_val_time
         logger.info(f"Initial validation - Loss: {init_val_metrics['loss']:.4f}, Accuracy: {init_val_metrics['acc']:.2f}%")
+
+        # measure throughput
+        try:
+            sample_batch, _ = next(iter(self.val_loader))
+            batch_size = sample_batch.size(0)
+
+            # Warm up
+            for _ in range(3):
+                with torch.no_grad():
+                    self.model(sample_batch.to(self.device))
+
+            # Time forward pass
+            iterations = 5
+            start_time = time.time()
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+
+            with torch.no_grad():
+                for _ in range(iterations):
+                    self.model(sample_batch.to(self.device))
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            end_time = time.time()
+
+            # Calculate metrics
+            inference_time = (end_time - start_time) / iterations
+            samples_per_second = batch_size / inference_time
+
+            # Log metrics
+            logger.info(f"Initial forward pass throughput: {samples_per_second:.1f} samples/sec")
+            self.metrics['initial_throughput'] = {'samples_per_second': samples_per_second,}
+        except Exception as e:
+            logger.error(f"Error measuring initial throughput: {str(e)}")
 
         total_start_time = time.time()
 
@@ -273,7 +314,7 @@ class ModelTrainer:
 
             val_metrics = self.evaluate(self.val_loader)
 
-            epoch_timing = { 'epoch': epoch + 1, 'train_time': train_time, 'total_epoch_time': train_time}
+            epoch_timing = {'epoch': epoch + 1, 'train_time': train_time, 'total_epoch_time': train_time}
 
             self.metrics['timing']['per_epoch'].append(epoch_timing)
             self.metrics['timing']['training_time'] += train_time

@@ -11,7 +11,6 @@ from config.architecture_config import PARAMETER_TARGETS
 logger = logging.getLogger('validators')
 
 
-
 def count_parameters(model: nn.Module) -> Dict[str, int]:
     """
     Count model parameters with basic aggregation.
@@ -28,8 +27,8 @@ def analyze_model_parameters(model: nn.Module, input_shape: Optional[Tuple[int, 
     """
     basic_counts = count_parameters(model)
     result = {**basic_counts}
-
     module_params = {}
+
     for name, module in model.named_modules():
         if len(list(module.children())) == 0:  # Leaf
             params = sum(p.numel() for p in module.parameters(recurse=False))
@@ -41,7 +40,7 @@ def analyze_model_parameters(model: nn.Module, input_shape: Optional[Tuple[int, 
 
     result['param_distribution'] = module_params
 
-    # Use torchinfo
+    # torchinfo
     summary = torchinfo.summary(model, input_size=input_shape, col_names=["input_size", "output_size", "num_params", "kernel_size", "mult_adds"], verbose=0)
     result['layer_info'] = summary.summary_list
     result['total_mult_adds'] = summary.total_mult_adds
@@ -59,7 +58,7 @@ def validate_model_parameters(model: nn.Module, model_type: str, model_size: str
     if target_params is None:
         raise ValueError(f"Unknown model size: {model_size}")
 
-    # Get comprehensive parameter analysis
+    # Get parameter analysis
     param_analysis = analyze_model_parameters(model, input_shape)
     param_counts = {'total': param_analysis['total'], 'trainable': param_analysis['trainable'], 'non_trainable': param_analysis['non_trainable']}
     min_params = int(target_params * (1 - tolerance))
@@ -67,9 +66,9 @@ def validate_model_parameters(model: nn.Module, model_type: str, model_size: str
     is_within_range = min_params <= param_counts['total'] <= max_params
     percent_of_target = (param_counts['total'] / target_params) * 100
     recommendations = []
+
     if not is_within_range:
         param_diff = param_counts['total'] - target_params
-
         if param_diff > 0:
             # Analyze distribution to recommend reductions
             distributions = param_analysis.get('param_distribution', {})
@@ -105,12 +104,12 @@ def validate_model_parameters(model: nn.Module, model_type: str, model_size: str
         'recommendations': recommendations
     }
 
-    # Add advanced analysis if available
+    # analysis
     for key in ['param_distribution', 'layer_info', 'total_mult_adds', 'forward_elapsed_time', 'memory_footprint_mb']:
         if key in param_analysis:
             result[key] = param_analysis[key]
 
-    # Log validation result
+    # Log validation
     log_message = (f"Model {model_type} {model_size}: {param_counts['total']:,} parameters ({percent_of_target:.1f}% of target {target_params:,})")
     if is_within_range:
         logger.info(f"✓ {log_message}")
@@ -132,7 +131,6 @@ def validate_model_parameters(model: nn.Module, model_type: str, model_size: str
                 output = model(dummy_input)
             inference_time = time.time() - start_time
 
-            # Get output shape
             if isinstance(output, tuple):
                 output_shape = tuple(o.shape for o in output)
             else:
@@ -141,14 +139,9 @@ def validate_model_parameters(model: nn.Module, model_type: str, model_size: str
             # Calculate throughput
             samples_per_second = input_shape[0] / inference_time
 
-            result['forward_pass'] = {
-                'success': True,
-                'input_shape': input_shape,
-                'output_shape': output_shape,
-                'inference_time': inference_time,
-                'samples_per_second': samples_per_second,
-                'ms_per_sample': (inference_time * 1000) / input_shape[0]
-            }
+            result['forward_pass'] = {'success': True, 'input_shape': input_shape, 'output_shape': output_shape, 'inference_time': inference_time,
+                                      'samples_per_second': samples_per_second, 'ms_per_sample': (inference_time * 1000) / input_shape[0]}
+
             logger.info(f"Forward pass successful for {model_type} {model_size}: {samples_per_second:.1f} samples/sec, {(inference_time * 1000) / input_shape[0]:.2f} ms/sample")
 
         except Exception as e:

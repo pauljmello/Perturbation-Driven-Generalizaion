@@ -7,8 +7,8 @@ from config.architecture_config import get_architecture_config
 from config.model_registry import ModelRegistry
 from models.base import BaseModel
 
-
 logger = logging.getLogger(__name__)
+
 
 class BaseVAE(BaseModel):
     """
@@ -63,7 +63,7 @@ class BaseVAE(BaseModel):
         hidden_dims_reversed = self.hidden_dims.copy()
         hidden_dims_reversed.reverse()
 
-        self.decoder_reshape = nn.Unflatten(1, (hidden_dims_reversed[0], encoder_output_size, encoder_output_size)) # Ugly fix
+        self.decoder_reshape = nn.Unflatten(1, (hidden_dims_reversed[0], encoder_output_size, encoder_output_size))  # Ugly fix
 
         # Decoder CNN layers
         for i in range(len(hidden_dims_reversed) - 1):
