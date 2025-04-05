@@ -5,10 +5,13 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.amp as amp
 
 from augmentation.advanced import MixUp, CutMix, AdversarialNoise
 from config.architecture_config import EXPERIMENT_CONFIG
-from models.base import BaseModel
+
+# Force models to register in experiments
+from models.base import BaseModel # Crucial, do not remove
 
 logger = logging.getLogger('trainer')
 
@@ -21,7 +24,7 @@ class ModelTrainer:
     """
     Unified trainer.
     """
-    def __init__(self, model: BaseModel, train_loader, val_loader, test_loader, device: torch.device, model_dir, exp_id: str, augmentations=None, augmentation_intensities=None, callbacks=None, save_intermediate: bool = False):
+    def __init__(self, model, train_loader, val_loader, test_loader, device, model_dir, exp_id, augmentations=None, augmentation_intensities=None, callbacks=None, save_intermediate=False):
         """
         Initialize the model trainer with parameters for training.
         """
@@ -44,6 +47,32 @@ class ModelTrainer:
         self.best_val_acc = 0
         self.best_epoch = 0
         self.counter = 0
+
+        precision = EXPERIMENT_CONFIG.get('precision', 'fp32')
+        try:
+            if precision != 'fp32' and torch.cuda.is_available():
+                from utils.utils import setup_mixed_precision
+                self.model, self.scaler = setup_mixed_precision(self.model, precision)
+
+                if precision == 'fp16':
+                    self.amp_dtype = torch.float16
+                    self.use_amp = True
+                elif precision == 'bfp16':
+                    self.amp_dtype = torch.bfloat16
+                    self.use_amp = True
+                elif precision == 'fp8':
+                    self.amp_dtype = torch.bfloat16  # FP8 uses BF16 for autocast
+                    self.use_amp = True
+                else:
+                    self.scaler = None
+                    self.use_amp = False
+            else:
+                self.scaler = None
+                self.use_amp = False
+        except Exception as e:
+            logger.warning(f"Mixed precision initialization failed: {str(e)}. Using fp32 instead.")
+            self.scaler = None
+            self.use_amp = False
 
     def _initialize_components(self):
         """
@@ -114,7 +143,15 @@ class ModelTrainer:
                 self._track_vae_losses(outputs, inputs)
         else:
             y_pred = outputs
-        if targets_a is not None and targets_b is not None and lam != 1.0:
+
+        # Convert tensor
+        if isinstance(lam, torch.Tensor):
+            if lam.numel() == 1:
+                lam = lam.item()  # Single value tensor
+            else:
+                lam = lam.mean().item()  # Multi-value tensor
+
+        if targets_a is not None and targets_b is not None and abs(lam - 1.0) > 1e-6:
             # Mixup/Cutmix
             cls_loss = lam * self.criterion(y_pred, targets_a) + (1 - lam) * self.criterion(y_pred, targets_b)
         else:
@@ -140,79 +177,96 @@ class ModelTrainer:
             kl_loss = (-0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp()) / mu.size(0)).item()
             self.metrics.setdefault('kl_loss', []).append(kl_loss)
 
-    def train_epoch(self, epoch: int):
+    def train_epoch(self):
         """
         Training loop with reduced memory usage.
         """
         self.model.train()
-        total_loss = torch.tensor(0.0, device=self.device)
-        correct = torch.tensor(0, device=self.device)
-        total = torch.tensor(0, device=self.device)
+        total_loss = 0.0
+        correct = 0
+        total = 0
         start_time = time.time()
-        iterator = self.train_loader
 
-        for inputs, targets in iterator:
-            inputs = inputs.to(self.device)
-            targets = targets.to(self.device)
+        for inputs, targets in self.train_loader:
+            inputs, targets = inputs.to(self.device, non_blocking=True), targets.to(self.device, non_blocking=True)
+
             if self.batch_augs:
                 batch_aug = random.choice(self.batch_augs)
                 inputs, targets_a, targets_b, lam = batch_aug.apply_batch(inputs, targets)
             else:
-                targets_a = targets_b = targets
-                lam = 1.0
+                targets_a, targets_b, lam = targets, targets, 1.0
 
             self.optimizer.zero_grad(set_to_none=True)
-            outputs = self.model(inputs)
-            loss = self.calculate_loss(outputs=outputs, inputs=inputs, targets=targets, targets_a=targets_a, targets_b=targets_b, lam=lam)
 
-            loss.backward()
-            self.optimizer.step()
+            if self.use_amp:
+                with amp.autocast(device_type='cuda', dtype=self.amp_dtype):
+                    outputs = self.model(inputs)
+                    loss = self.calculate_loss(outputs, inputs, targets, targets_a, targets_b, lam)
 
-            total_loss += loss
-
-            if isinstance(outputs, tuple) and len(outputs) >= 1:
-                pred = outputs[0]
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    self.optimizer.step()
             else:
-                pred = outputs
+                outputs = self.model(inputs)
+                loss = self.calculate_loss(outputs, inputs, targets, targets_a, targets_b, lam)
+                loss.backward()
+                self.optimizer.step()
+
+            total_loss += loss.item()
+            pred = outputs[0] if isinstance(outputs, tuple) and len(outputs) >= 1 else outputs
 
             with torch.no_grad():
                 _, predicted = pred.max(1)
                 correct += (predicted == targets).sum().item()
                 total += targets.size(0)
 
-        # Calculate metrics
         epoch_time = time.time() - start_time
-        batch_count = torch.tensor(len(self.train_loader), device=self.device)
-        avg_loss = (total_loss / batch_count).item()
-        accuracy = (100.0 * correct / total).item()
+        avg_loss = total_loss / len(self.train_loader)
+        accuracy = 100.0 * correct / total
 
         return {'loss': avg_loss, 'acc': accuracy, 'epoch_time': epoch_time}
 
     def evaluate(self, data_loader):
         self.model.eval()
-        total_loss = torch.tensor(0.0, device=self.device)
-        correct = torch.tensor(0, device=self.device)
-        total = torch.tensor(0, device=self.device)
+        total_loss = 0.0
+        correct = 0
+        total = 0
+
+        precision = EXPERIMENT_CONFIG.get('precision', 'fp32')
+        use_amp = precision in ['fp16', 'bfp16'] and torch.cuda.is_available()
+
         with torch.no_grad():
             for inputs, targets in data_loader:
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-                outputs = self.model(inputs)
-                if isinstance(outputs, tuple) and len(outputs) == 4:
-                    y_pred, x_recon, mu, log_var = outputs
-                    loss = self.criterion(y_pred, targets)
-                    pred = y_pred
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
+
+                if use_amp:
+                    amp_dtype = torch.float16 if precision == 'fp16' else torch.bfloat16
+                    with amp.autocast(device_type='cuda', dtype=amp_dtype):
+                        outputs = self.model(inputs)
+                        if isinstance(outputs, tuple) and len(outputs) == 4:
+                            pred, x_recon, mu, log_var = outputs
+                            loss = self.criterion(pred, targets)
+                        else:
+                            pred, loss = outputs, self.criterion(outputs, targets)
                 else:
-                    loss = self.criterion(outputs, targets)
-                    pred = outputs
+                    outputs = self.model(inputs)
+                    if isinstance(outputs, tuple) and len(outputs) == 4:
+                        pred, x_recon, mu, log_var = outputs
+                        loss = self.criterion(pred, targets)
+                    else:
+                        pred, loss = outputs, self.criterion(outputs, targets)
 
                 total_loss += loss.item()
                 _, predicted = pred.max(1)
                 correct += predicted.eq(targets).sum().item()
                 total += targets.size(0)
-        batch_count = torch.tensor(len(self.train_loader), device=self.device)
-        avg_loss = (total_loss / batch_count).item()
-        accuracy = (100.0 * correct / total).item()
+
+        avg_loss = total_loss / len(data_loader)
+        accuracy = 100.0 * correct / total
 
         return {'loss': avg_loss, 'acc': accuracy}
 
@@ -309,7 +363,7 @@ class ModelTrainer:
         # Main training loop
         for epoch in range(EXPERIMENT_CONFIG['num_epochs']):
             train_start = time.time()
-            epoch_metrics = self.train_epoch(epoch)
+            epoch_metrics = self.train_epoch()
             train_time = time.time() - train_start
 
             val_metrics = self.evaluate(self.val_loader)

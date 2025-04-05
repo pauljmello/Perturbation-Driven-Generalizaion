@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
+from config.architecture_config import EXPERIMENT_CONFIG
+
 logger = logging.getLogger('checkpoint')
 
 
@@ -49,8 +51,15 @@ class CheckpointManager:
         Save a single experiment result to the checkpoint file.
         """
         try:
-            # Handle complex data
-            serialized_result = self._serialize_complex_values(result)
+            if EXPERIMENT_CONFIG.get('metrics_precision', 'fp32') == 'fp8':
+                result_to_save = result.copy()
+                for field in ['train_loss', 'train_acc', 'val_loss', 'val_acc', 'test_loss', 'test_acc', 'epoch_times']:
+                    if field in result_to_save:
+                        result_to_save[field] = compress_to_fp8(result_to_save[field])
+            else:
+                result_to_save = result
+
+            serialized_result = self._serialize_complex_values(result_to_save)
             write_header = not self.checkpoint_path.exists() or self.checkpoint_path.stat().st_size == 0
 
             if not self.fieldnames:
@@ -69,8 +78,6 @@ class CheckpointManager:
                 if write_header:
                     writer.writeheader()
                 writer.writerow(serialized_result)
-
-            logger.info(f"Checkpoint saved")
         except Exception as e:
             logger.error(f"Error saving checkpoint: {str(e)}")
 
@@ -107,3 +114,16 @@ class CheckpointManager:
         except Exception as e:
             logger.error(f"Error loading checkpoints: {str(e)}")
             return []
+
+
+def compress_to_fp8(value):
+    """
+    FP8 precision for storing data.
+    """
+    if isinstance(value, (list, tuple)):
+        return type(value)(compress_to_fp8(x) for x in value)
+    elif isinstance(value, dict):
+        return {k: compress_to_fp8(v) for k, v in value.items()}
+    elif isinstance(value, float):
+        return 0.0 if abs(value) < 1e-10 else float('{:.2g}'.format(value))
+    return value

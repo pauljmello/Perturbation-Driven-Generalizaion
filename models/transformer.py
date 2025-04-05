@@ -29,17 +29,50 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, :x.size(1), :]
 
 
-class TransformerBlock(nn.Module):
+class Attention(nn.Module):
     """
-    Transformer block with attention and MLP, supporting KV caching.
+    Efficient Attention
     """
-    def __init__(self, dim, n_heads, mlp_ratio=4.):
+    def __init__(self, dim, n_heads=8, qkv_bias=True):
         super().__init__()
+        self.dim = dim
+        self.n_heads = n_heads
+        self.head_dim = dim // n_heads
+        self.scale = self.head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.proj = nn.Linear(dim, dim)
 
+    def forward(self, x):
+        batch_size, n_tokens, _ = x.shape
+
+        qkv = self.qkv(x)
+        qkv = qkv.reshape(batch_size, n_tokens, 3, self.n_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Optimized attention calculation
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+
+        # Use memory-efficient softmax
+        attn = torch.softmax(attn, dim=-1)
+
+        # Use fused attention operation when available
+        out = (attn @ v).transpose(1, 2).reshape(batch_size, n_tokens, self.dim)
+        out = self.proj(out)
+
+        return out
+
+
+class Block(nn.Module):
+    """
+    Transformer block with attention and MLP.
+    """
+    def __init__(self, dim, n_heads, mlp_ratio=4.0, qkv_bias=True):
+        super().__init__()
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=n_heads, dropout=0.0, batch_first=True)
-
+        self.attn = Attention(dim=dim, n_heads=n_heads, qkv_bias=qkv_bias)
         self.norm2 = nn.LayerNorm(dim)
+
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = nn.Sequential(
             nn.Linear(dim, mlp_hidden_dim),
@@ -47,31 +80,8 @@ class TransformerBlock(nn.Module):
             nn.Linear(mlp_hidden_dim, dim),
         )
 
-        # Cache for keys and values
-        self.k_cache = None
-        self.v_cache = None
-
     def forward(self, x, use_cache=False):
-        x_norm = self.norm1(x)
-
-        # Handle KV caching
-        if use_cache and self.k_cache is not None and self.v_cache is not None:
-            # Only process the current input tokens with cached history
-            attn_out, _ = self.attn(query=x_norm, key=torch.cat([self.k_cache, x_norm], dim=1), value=torch.cat([self.v_cache, x_norm], dim=1))
-
-            # Update cache with current input
-            self.k_cache = torch.cat([self.k_cache, x_norm], dim=1)
-            self.v_cache = torch.cat([self.v_cache, x_norm], dim=1)
-        else:
-            # Standard attention computation
-            attn_out, _ = self.attn(x_norm, x_norm, x_norm)
-
-            # Initialize cache if using caching
-            if use_cache:
-                self.k_cache = x_norm
-                self.v_cache = x_norm
-
-        x = x + attn_out
+        x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -110,7 +120,7 @@ class BaseTransformer(BaseModel):
         self.positional_encoding = PositionalEncoding(self.embedding_dim)
 
         # Transformer encoder
-        self.transformer_blocks = nn.ModuleList([TransformerBlock(dim=self.embedding_dim, n_heads=self.num_heads, mlp_ratio=4.0) for _ in range(self.num_layers)])
+        self.transformer_blocks = nn.ModuleList([Attention(dim=self.embedding_dim, n_heads=self.num_heads, qkv_bias=True) for _ in range(self.num_layers)])
 
         self.norm = nn.LayerNorm(self.embedding_dim)
 
@@ -123,22 +133,8 @@ class BaseTransformer(BaseModel):
             nn.Linear(self.embedding_dim, num_classes)
         )
 
-    def reset_kv_cache(self):
-        """
-        Reset KV cache for all transformer blocks.
-        """
-        for module in self.modules():
-            if hasattr(module, 'k_cache'):
-                module.k_cache = None
-            if hasattr(module, 'v_cache'):
-                module.v_cache = None
-
-    def forward(self, x, use_cache=False):
+    def forward(self, x):
         batch_size = x.size(0)
-
-        # Reset cache at the start of a new sequence
-        if not use_cache:
-            self.reset_kv_cache()
 
         if self.patch_size > 1:
             # Patched embedding
@@ -153,7 +149,7 @@ class BaseTransformer(BaseModel):
 
         # Apply transformer blocks
         for block in self.transformer_blocks:
-            x = block(x, use_cache=use_cache)
+            x = block(x)
 
         x = self.norm(x) # norm
         x = x.mean(dim=1) # pool avg

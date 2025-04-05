@@ -4,13 +4,32 @@ from typing import Dict, Any
 
 logger = logging.getLogger('config')
 
+# Dataset
+DATASET_CONFIG = {
+    'mnist': {
+        'input_channels': 1,
+        'input_size': 28,
+        'num_classes': 10,
+        'mean': (0.1307,),
+        'std': (0.3081,),
+    },
+    'cifar10': {
+        'input_channels': 3,
+        'input_size': 32,
+        'num_classes': 10,
+        'mean': (0.4914, 0.4822, 0.4465),
+        'std': (0.2470, 0.2435, 0.2616),
+    }
+}
+
+
 EXPERIMENT_MODEL_TYPES = [
     'mlp',
     'cnn',
     'transformer',
     'vit',
     'vae',
-    'unet'
+#    'unet'  # Least Optimized (remove for speed)
 ]
 
 EXPERIMENT_MODEL_SIZES = [
@@ -26,9 +45,15 @@ EXPERIMENT_AUGMENTATIONS = [
     'cutout',
     'random_erasing',
     'horizontal_flip',
+    'vertical_flip',
+    'salt_pepper',
+    'gaussian_blur',
+    'frequency_domain',
+    'scale',
     'mixup',
     'cutmix',
-    'augmix'
+    'augmix',
+    'adversarial'
 ]
 
 EXPERIMENT_CONFIG = {
@@ -44,6 +69,38 @@ EXPERIMENT_CONFIG = {
     'model_types': EXPERIMENT_MODEL_TYPES,  # Options include: 'mlp', 'cnn', 'transformer', 'vit', 'vae', 'unet'
     'model_sizes': EXPERIMENT_MODEL_SIZES,  # Options: 'small', 'medium', 'large'
     'augmentations': EXPERIMENT_AUGMENTATIONS,  # Data augmentation techniques
+    'precision': 'bfp16',  # Options: 'fp32', 'fp16', 'bfp16'. 'fp8'  Best: bfp16
+    'metrics_precision': 'fp8',  # Options: 'fp32', 'fp8'
+}
+
+# Augmentation
+AUGMENTATION_CONFIG = {
+    'standard_augmentations': [
+        'gaussian_noise',
+        'rotation',
+        'translation',
+        'cutout',
+        'random_erasing',
+        'horizontal_flip',
+        'vertical_flip',
+        'salt_pepper',
+        'gaussian_blur',
+        'frequency_domain',
+        'scale'
+    ],
+    'advanced_augmentations': [
+        'mixup',
+        'cutmix',
+        'augmix',
+        'adversarial'
+    ],
+    'intensities': [0.1],  # [0.1, 0.3, 0.5]
+    'max_combination_size': 2,  # n >= 3 is too large for our resources
+    'mixup_alpha': 0.2,
+    'cutmix_alpha': 1.0,
+    'augmix_severity': 3,
+    'augmix_width': 3,
+    'augmix_depth': 2,
 }
 
 # Target parameter
@@ -185,48 +242,6 @@ UNET_ARCHITECTURE = {
     }
 }
 
-# Dataset
-DATASET_CONFIG = {
-    'mnist': {
-        'input_channels': 1,
-        'input_size': 28,
-        'num_classes': 10,
-        'mean': (0.1307,),
-        'std': (0.3081,),
-    },
-    'cifar10': {
-        'input_channels': 3,
-        'input_size': 32,
-        'num_classes': 10,
-        'mean': (0.4914, 0.4822, 0.4465),
-        'std': (0.2470, 0.2435, 0.2616),
-    }
-}
-
-# Augmentation
-AUGMENTATION_CONFIG = {
-    'standard_augmentations': [
-        'gaussian_noise',
-        'rotation',
-        'translation',
-        'cutout',
-        'random_erasing',
-        'horizontal_flip',
-    ],
-    'advanced_augmentations': [
-        'mixup',
-        'cutmix',
-        'augmix',
-    ],
-    'intensities': [0.1, 0.3, 0.5],
-    'max_combination_size': 3,
-    'mixup_alpha': 0.2,
-    'cutmix_alpha': 1.0,
-    'augmix_severity': 3,
-    'augmix_width': 3,
-    'augmix_depth': 2,
-}
-
 ARCHITECTURE_CONFIGS = {
     'cnn': CNN_ARCHITECTURE,
     'mlp': MLP_ARCHITECTURE,
@@ -235,7 +250,6 @@ ARCHITECTURE_CONFIGS = {
     'vae': VAE_ARCHITECTURE,
     'unet': UNET_ARCHITECTURE,
 }
-
 
 def get_architecture_config(model_type: str, model_size: str, dataset: str = None) -> Dict[str, Any]:
     """

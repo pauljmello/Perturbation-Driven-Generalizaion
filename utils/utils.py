@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import torch
-
+from torch import amp, nn
 
 from utils.checkpoint import CheckpointManager
 from config.architecture_config import AUGMENTATION_CONFIG
@@ -235,11 +235,6 @@ def run_single_experiment(model_type, model_size, dataset_name, device, train_lo
         model = create_model(model_type=model_type, model_size=model_size, dataset=dataset_name, device=device)
         logger.info(f"Created fresh model for {exp_id}")
 
-        # Reset KV cache
-        if hasattr(model, 'reset_kv_cache'):
-            model.reset_kv_cache()
-            logger.info(f"Reset KV cache for {exp_id}")
-
         model_dir = exp_dir / 'models'
         trainer = ModelTrainer(model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, device=device, model_dir=model_dir, exp_id=exp_id,
                                augmentations=list(aug_combo) if aug_combo else None, augmentation_intensities=list(intensity_combo) if intensity_combo else None, save_intermediate=False)
@@ -253,9 +248,6 @@ def run_single_experiment(model_type, model_size, dataset_name, device, train_lo
 
     except Exception as e:
         logger.error(f"Error during training for {exp_id}: {str(e)}")
-    finally:
-        if model is not None and hasattr(model, 'reset_kv_cache'):
-            model.reset_kv_cache()
 
     cleanup_experiment_resources(model, trainer)
 
@@ -328,8 +320,8 @@ def prepare_augmentation_experiment_list(combo_size, aug_combinations, intensity
     return all_experiments
 
 
-def run_single_augmentation_experiment(exp, dataset_manager, device, dataset_name, exp_dir, current_experiment, experiment_counter,
-                                       base_random_seed, checkpoint_manager, combo_results, current_dataloader_key, model_count):
+
+def run_single_augmentation_experiment(exp, dataset_manager, device, dataset_name, exp_dir, current_experiment, experiment_counter, base_random_seed, checkpoint_manager, combo_results, current_dataloader_key, model_count):
     """
     Run a single augmentation experiment.
     """
@@ -343,17 +335,22 @@ def run_single_augmentation_experiment(exp, dataset_manager, device, dataset_nam
     if current_dataloader_key != dataloader_key:
         if current_dataloader_key is not None:
             dataset_manager.cleanup_between_iterations(tag=f"{current_dataloader_key}_complete")
+
+        # Get dataloaders with the specific augmentations
         train_loader, val_loader, test_loader = dataset_manager.get_dataloaders(list(aug_combo), list(intensity_combo))
-        dataset_manager.dataloader_warmup(device)
+        logger.info(f"Warming up dataloaders with augmentations: {aug_combo}")
+        dataset_manager.dataloader_warmup(device, list(aug_combo), list(intensity_combo))
+
         current_dataloader_key = dataloader_key
         model_count = 0
     else:
+        # Refresh dataloader reference even when reused
         train_loader, val_loader, test_loader = dataset_manager.get_dataloaders(list(aug_combo), list(intensity_combo))
 
     current_experiment += 1
     model_count += 1
     run_single_experiment(model_type, model_size, dataset_name, device, train_loader, val_loader, test_loader, exp_dir, current_experiment,
-                                  experiment_counter['total'], base_random_seed, checkpoint_manager, combo_results,aug_combo, intensity_combo)
+                          experiment_counter['total'], base_random_seed, checkpoint_manager, combo_results, aug_combo, intensity_combo)
 
     return current_experiment, model_count, current_dataloader_key, model_count
 
@@ -431,3 +428,34 @@ def finalize_experiments(all_results, exp_dir, current_experiment, experiment_co
 
     logger.info(f"All experiments completed. Results saved to {exp_dir}")
     logger.info(f"Total experiments run: {current_experiment} out of {experiment_counter['total']}")
+
+
+# Tools
+
+
+def setup_mixed_precision(model, precision='fp32'):
+    """
+    Efficiently configure model for mixed precision training with CUDA.
+    """
+    if precision == 'fp32' or not torch.cuda.is_available():
+        return model, None
+
+    if precision == 'fp16':
+        scaler = amp.GradScaler()
+        return model, scaler
+    elif precision == 'bfp16':
+        if not hasattr(torch, 'bfloat16'):
+            logger.warning("bfp16 not supported in this PyTorch version, falling back to fp32")
+            return model, None
+        return model, None
+    elif precision == 'fp8':
+        if hasattr(torch.cuda, 'is_fp8_available') and torch.cuda.is_fp8_available():
+            scaler = amp.GradScaler()  # FP8 needs scaling
+            return model, scaler
+        else:
+            logger.warning("FP8 not supported in this PyTorch version, falling back to bfp16")
+            return setup_mixed_precision(model, 'bfp16')
+
+    else:
+        logger.warning(f"Unknown precision format: {precision}, falling back to fp32")
+        return model, None

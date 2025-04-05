@@ -147,7 +147,14 @@ class AdversarialNoise(BatchAugmentationBase):
 
         for _ in range(self.iterations):
             outputs = self.model(perturbed_images)
-            loss = torch.nn.functional.cross_entropy(outputs, targets)
+
+            # Handle tuple outputs (like from VAE models)
+            if isinstance(outputs, tuple):
+                model_output = outputs[0]  # Extract classification logits
+            else:
+                model_output = outputs
+
+            loss = torch.nn.functional.cross_entropy(model_output, targets)
 
             self.model.zero_grad()
             loss.backward()

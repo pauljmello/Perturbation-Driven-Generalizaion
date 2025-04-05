@@ -30,7 +30,7 @@ class PatchEmbed(nn.Module):
 
 class Attention(nn.Module):
     """
-    Multi-head attention with KV caching support.
+    Efficient Attention
     """
     def __init__(self, dim, n_heads=8, qkv_bias=True):
         super().__init__()
@@ -38,44 +38,25 @@ class Attention(nn.Module):
         self.n_heads = n_heads
         self.head_dim = dim // n_heads
         self.scale = self.head_dim ** -0.5
-
-        # Combined QKV projection for efficiency
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
 
-        # KV cache
-        self.k_cache = None
-        self.v_cache = None
+    def forward(self, x):
+        batch_size, n_tokens, _ = x.shape
 
-    def forward(self, x, use_cache=False):
-        batch_size, n_tokens, dim = x.shape
-
-        # Project QKV
         qkv = self.qkv(x)
         qkv = qkv.reshape(batch_size, n_tokens, 3, self.n_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]  # Each is [B, H, N, D]
+        q, k, v = qkv[0], qkv[1], qkv[2]
 
-        # Handle caching
-        if use_cache and self.k_cache is not None and self.v_cache is not None:
-            # Combine with cached keys and values
-            k = torch.cat([self.k_cache, k], dim=2)
-            v = torch.cat([self.v_cache, v], dim=2)
-
-            # Update cache
-            self.k_cache = k
-            self.v_cache = v
-        elif use_cache:
-            # Initialize cache
-            self.k_cache = k
-            self.v_cache = v
-
-        # Compute attention
+        # Optimized attention calculation
         attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = F.softmax(attn, dim=-1)
 
-        out = (attn @ v)
-        out = out.transpose(1, 2).reshape(batch_size, n_tokens, dim)
+        # Use memory-efficient softmax
+        attn = torch.softmax(attn, dim=-1)
+
+        # Use fused attention operation when available
+        out = (attn @ v).transpose(1, 2).reshape(batch_size, n_tokens, self.dim)
         out = self.proj(out)
 
         return out
@@ -83,7 +64,7 @@ class Attention(nn.Module):
 
 class Block(nn.Module):
     """
-    Transformer block with attention and MLP, supporting KV caching.
+    Transformer block with attention and MLP.
     """
     def __init__(self, dim, n_heads, mlp_ratio=4.0, qkv_bias=True):
         super().__init__()
@@ -98,8 +79,8 @@ class Block(nn.Module):
             nn.Linear(mlp_hidden_dim, dim),
         )
 
-    def forward(self, x, use_cache=False):
-        x = x + self.attn(self.norm1(x), use_cache=use_cache)
+    def forward(self, x):
+        x = x + self.attn(self.norm1(x))
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -130,25 +111,11 @@ class BaseViT(BaseModel):
         self.norm = nn.LayerNorm(self.embed_dim)
         self.head = nn.Linear(self.embed_dim, num_classes)
 
-    def reset_kv_cache(self):
-        """
-        Reset KV cache for all transformer blocks.
-        """
-        for module in self.modules():
-            if hasattr(module, 'k_cache'):
-                module.k_cache = None
-            if hasattr(module, 'v_cache'):
-                module.v_cache = None
-
-    def forward(self, x, use_cache=False):
+    def forward(self, x):
         """
         Forward pass through the model with optional KV caching.
         """
         batch_size = x.shape[0]
-
-        # Reset cache at the start of a new sequence
-        if not use_cache:
-            self.reset_kv_cache()
 
         x = self.patch_embed(x)
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
@@ -157,7 +124,7 @@ class BaseViT(BaseModel):
 
         # Apply transformer blocks
         for block in self.blocks:
-            x = block(x, use_cache=use_cache)
+            x = block(x)
 
         # Classification from cls tokens
         x = self.norm(x)

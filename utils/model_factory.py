@@ -36,7 +36,7 @@ def create_model(model_type: str, model_size: str, dataset: str, device: torch.d
             model = factory(model_size, input_channels, num_classes)
         else:
             model = factory(model_size, input_channels, input_size, num_classes)
-        return model.to(device)
+        return model.to(device, non_blocking=True)
 
     except Exception as e:
         logger.exception(f"Failed to create {model_type} {model_size} model: {str(e)}")

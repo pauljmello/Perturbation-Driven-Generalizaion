@@ -46,7 +46,7 @@ def main():
     dataset_name, model_types, model_sizes, aug_configs, experiment_counter = prepare_experiment_config(args, EXPERIMENT_CONFIG)
 
     warmup_pytorch(device)
-    dataset_manager = DatasetManager(dataset_name, EXPERIMENT_CONFIG['batch_size'], base_random_seed)
+    dataset_manager = DatasetManager(dataset_name, EXPERIMENT_CONFIG['batch_size'], base_random_seed, max_cache_size=3)
     DatasetManager.dataloader_warmup(dataset_manager, device)
 
     # Run baselines

@@ -18,7 +18,7 @@ class LRUCache(OrderedDict):
     """
     Least Recently Used (LRU) cache with limited size.
     """
-    def __init__(self, maxsize=10):
+    def __init__(self, maxsize):
         super().__init__()
         self.maxsize = maxsize
 
@@ -59,7 +59,7 @@ class DatasetManager:
     """
     Optimized dataset manager with better caching and resource handling.
     """
-    def __init__(self, dataset_name, batch_size, seed, max_cache_size=3):
+    def __init__(self, dataset_name, batch_size, seed, max_cache_size):
         """
         Initialize DatasetManager with LRU cache for dataloaders.
         """
@@ -68,6 +68,9 @@ class DatasetManager:
         self.dataset_config = get_dataset_config(dataset_name)
         self.dataloader_cache = LRUCache(maxsize=max_cache_size)
         self._prepare_datasets_and_transforms(seed)
+
+        if hasattr(torch, 'multiprocessing'):
+            torch.multiprocessing.set_sharing_strategy('file_system')
 
     def _prepare_datasets_and_transforms(self, seed):
         """
@@ -106,6 +109,7 @@ class DatasetManager:
         val_dataset = TransformSubset(self.train_dataset_base, self.val_indices, self.base_transform)
         test_dataset = TransformSubset(self.test_dataset_base, range(len(self.test_dataset_base)), self.base_transform)
 
+        # Significant gains in using an optimized number of workers with prefetch factor in train specifically. Best found 8work @ 8pre, else 2work @ 2pre
         train_loader = self._create_dataloader(train_dataset, shuffle=True, workers=8)
         val_loader = self._create_dataloader(val_dataset, shuffle=False, workers=2)
         test_loader = self._create_dataloader(test_dataset, shuffle=False, workers=2)
@@ -129,9 +133,6 @@ class DatasetManager:
         self.cleanup_cache()
 
         if model is not None:
-            if hasattr(model, 'reset_kv_cache'):
-                model.reset_kv_cache()
-
             if next(model.parameters()).is_cuda:
                 model_device = next(model.parameters()).device
                 model.to('cpu')
@@ -185,25 +186,30 @@ class DatasetManager:
         logger.info("Dataloader cache cleaned up")
 
     def dataloader_warmup(self, device, aug_techniques=None, aug_intensities=None):
-        """
-        Warm up dataloaders with specific augmentations to ensure readiness.
-        """
-        logger.info(f"Warming up dataloaders {'with augmentations' if aug_techniques else 'without augmentations'}")
+        aug_msg = "with augmentations" if aug_techniques else "without augmentations"
+        logger.info(f"Warming up dataloaders {aug_msg}")
+
         try:
-            # Get the specific dataloaders with the exact augmentation config
+            # Important: Use the same augmentations that will be used in training
             loaders = self.get_dataloaders(aug_techniques, aug_intensities)
 
-            # Warm up each loader
             for i, loader in enumerate(loaders):
                 loader_name = ["train", "val", "test"][i]
                 try:
-                    batch = next(iter(loader))
-                    batch[0] = batch[0].to(device)
-                    logger.debug(f"Successfully warmed up {loader_name} loader")
+                    batch_count = 0
+                    max_batches = 3
+
+                    for batch in loader:
+                        sample_batch = [b.to(device, non_blocking=True) for b in batch]
+                        batch_count += 1
+                        # Clear references to free memory
+                        del sample_batch
+                        if batch_count >= max_batches:
+                            break
+
+                    logger.debug(f"Successfully warmed up {loader_name} loader with {batch_count} batches")
                 except StopIteration:
                     logger.warning(f"Empty {loader_name} dataloader")
-                except Exception as e:
-                    logger.warning(f"Error warming up {loader_name} dataloader: {e}")
 
             logger.info("Dataloader warmup complete")
             return True
