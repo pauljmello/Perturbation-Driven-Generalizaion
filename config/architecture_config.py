@@ -59,7 +59,7 @@ EXPERIMENT_AUGMENTATIONS = [
 EXPERIMENT_CONFIG = {
     'dataset': 'cifar10',  # Options: 'mnist' or 'cifar10'
     'batch_size': 512,
-    'num_epochs': 3,
+    'num_epochs': 50,
     'learning_rate': 0.0004,
     'weight_decay': 1e-5,
     'optimizer': 'adamw',  # Options: 'adam', 'adamw', 'sgd'
@@ -94,8 +94,10 @@ AUGMENTATION_CONFIG = {
         'augmix',
         'adversarial'
     ],
-    'intensities': [0.1],  # [0.1, 0.3, 0.5]
+    'intensities': [0.1, 0.3, 0.5],  # [0.1, 0.3, 0.5]
     'max_combination_size': 2,  # n >= 3 is too large for our resources
+
+    # Prams selected according to respective papers
     'mixup_alpha': 0.2,
     'cutmix_alpha': 1.0,
     'augmix_severity': 3,
@@ -113,15 +115,15 @@ PARAMETER_TARGETS = {
 # MLP architecture
 MLP_ARCHITECTURE = {
     'small': {
-        'hidden_dims': [464, 464, 464, 464],
+        'hidden_dims': [256, 256, 256, 256],
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'hidden_dims': [704, 704, 704, 704, 704, 704],
+        'hidden_dims': [512, 512, 512, 512, 512, 512],
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'hidden_dims': [1062, 1062, 1062, 1062, 1062, 1062, 1062, 1062],
+        'hidden_dims': [1028, 1028, 1028, 1028, 1028, 1028, 1028],
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
@@ -129,18 +131,15 @@ MLP_ARCHITECTURE = {
 # CNN architecture
 CNN_ARCHITECTURE = {
     'small': {
-        'channels': [64, 112, 160],
-        'blocks': 2,
+        'channels': [112, 112, 112],
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'channels': [50, 100, 200, 401],
-        'blocks': 3,
+        'channels': [190, 190, 190, 190, 190],
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'channels': [44, 88, 176, 348, 696],
-        'blocks': 4,
+        'channels': [256, 256, 256, 256, 256, 256, 256, 256],
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
@@ -148,27 +147,24 @@ CNN_ARCHITECTURE = {
 # Transformer architecture
 TRANSFORMER_ARCHITECTURE = {
     'small': {
-        'embed_dim': 160,
+        'embed_dim': 248,
         'depth': 3,
         'heads': 2,
-        'mlp_ratio': 1.0,
-        'patch_size': 4,
+        'mlp_ratio': 2.0,
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'embed_dim': 240,
-        'depth': 4,
-        'heads': 3,
+        'embed_dim': 352,
+        'depth': 5,
+        'heads': 4,
         'mlp_ratio': 2.0,
-        'patch_size': 4,
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'embed_dim': 300,
+        'embed_dim': 496,
         'depth': 8,
-        'heads': 4,
-        'mlp_ratio': 4.0,
-        'patch_size': 4,
+        'heads': 8,
+        'mlp_ratio': 3.0,
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
@@ -176,7 +172,7 @@ TRANSFORMER_ARCHITECTURE = {
 # Vision Transformer (ViT)
 VIT_ARCHITECTURE = {
     'small': {
-        'embed_dim': 164,
+        'embed_dim': 162,
         'depth': 3,
         'heads': 2,
         'mlp_ratio': 1.0,
@@ -184,9 +180,9 @@ VIT_ARCHITECTURE = {
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'embed_dim': 249,
+        'embed_dim': 248,
         'depth': 4,
-        'heads': 3,
+        'heads': 4,
         'mlp_ratio': 2.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['medium'],
@@ -194,8 +190,8 @@ VIT_ARCHITECTURE = {
     'large': {
         'embed_dim': 300,
         'depth': 8,
-        'heads': 4,
-        'mlp_ratio': 4.0,
+        'heads': 8,
+        'mlp_ratio': 3.0,
         'patch_size': 4,
         'target_params': PARAMETER_TARGETS['large'],
     }
