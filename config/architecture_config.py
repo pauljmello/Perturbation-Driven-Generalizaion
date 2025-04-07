@@ -42,7 +42,7 @@ EXPERIMENT_AUGMENTATIONS = [
     'gaussian_noise',
     'rotation',
     'translation',
-    'cutout',
+#    'cutout',
     'random_erasing',
     'horizontal_flip',
     'vertical_flip',
@@ -50,22 +50,22 @@ EXPERIMENT_AUGMENTATIONS = [
     'gaussian_blur',
     'frequency_domain',
     'scale',
-    'mixup',
-    'cutmix',
-    'augmix',
-    'adversarial'
+#    'mixup',
+#    'cutmix',
+#    'augmix',
+#    'adversarial'
 ]
 
 EXPERIMENT_CONFIG = {
     'dataset': 'cifar10',  # Options: 'mnist' or 'cifar10'
     'batch_size': 512,
     'num_epochs': 50,
-    'learning_rate': 0.0004,
+    'learning_rate': 0.001,
     'weight_decay': 1e-5,
     'optimizer': 'adamw',  # Options: 'adam', 'adamw', 'sgd'
     'scheduler': 'none',  # Options: 'step', 'cosine', 'none'
     'num_runs': 1,
-    'random_seed': 0,
+    'random_seed': 0,  # Useless (code constantly resets new seeds)
     'model_types': EXPERIMENT_MODEL_TYPES,  # Options include: 'mlp', 'cnn', 'transformer', 'vit', 'vae', 'unet'
     'model_sizes': EXPERIMENT_MODEL_SIZES,  # Options: 'small', 'medium', 'large'
     'augmentations': EXPERIMENT_AUGMENTATIONS,  # Data augmentation techniques
@@ -115,15 +115,15 @@ PARAMETER_TARGETS = {
 # MLP architecture
 MLP_ARCHITECTURE = {
     'small': {
-        'hidden_dims': [256, 256, 256, 256],
+        'hidden_dims': [280, 280, 280],
         'target_params': PARAMETER_TARGETS['small'],
     },
     'medium': {
-        'hidden_dims': [512, 512, 512, 512, 512, 512],
+        'hidden_dims': [520, 520, 520, 520, 520, 520],
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'hidden_dims': [1028, 1028, 1028, 1028, 1028, 1028, 1028],
+        'hidden_dims': [1000, 1000, 1000, 1000, 1000, 1000, 1000],
         'target_params': PARAMETER_TARGETS['large'],
     }
 }
@@ -188,7 +188,7 @@ VIT_ARCHITECTURE = {
         'target_params': PARAMETER_TARGETS['medium'],
     },
     'large': {
-        'embed_dim': 300,
+        'embed_dim': 296,
         'depth': 8,
         'heads': 8,
         'mlp_ratio': 3.0,

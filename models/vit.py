@@ -29,37 +29,27 @@ class PatchEmbed(nn.Module):
 
 
 class Attention(nn.Module):
-    """
-    Efficient Attention
-    """
-    def __init__(self, dim, n_heads=8, qkv_bias=True):
+    def __init__(self, dim, n_heads, qkv_bias=True):
         super().__init__()
-        self.dim = dim
         self.n_heads = n_heads
         self.head_dim = dim // n_heads
-        self.scale = self.head_dim ** -0.5
+        # Combine Q, K, V projections into one for efficiency
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.proj = nn.Linear(dim, dim)
+        self.proj = nn.Linear(dim, dim)  # output projection
 
     def forward(self, x):
-        batch_size, n_tokens, _ = x.shape
+        B, N, C = x.shape  # batch, seq_len, embed_dim
+        # Compute Q, K, V in a single linear projection
+        qkv = self.qkv(x)  # shape (B, N, 3*C)
+        qkv = qkv.reshape(B, N, 3, self.n_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # shape (3, B, heads, N, head_dim)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each shape (B, heads, N, head_dim)
 
-        qkv = self.qkv(x)
-        qkv = qkv.reshape(batch_size, n_tokens, 3, self.n_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-
-        # Optimized attention calculation
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-
-        # Use memory-efficient softmax
-        attn = torch.softmax(attn, dim=-1)
-
-        # Use fused attention operation when available
-        out = (attn @ v).transpose(1, 2).reshape(batch_size, n_tokens, self.dim)
-        out = self.proj(out)
-
-        return out
+        # Scaled dot-product attention (uses fused FlashAttention if available)
+        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=0.0)
+        # Merge heads back together
+        attn_out = attn_out.permute(0, 2, 1, 3).reshape(B, N, C)
+        return self.proj(attn_out)
 
 
 class Block(nn.Module):

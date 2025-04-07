@@ -4,9 +4,13 @@ import logging
 import os
 import sys
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-os.environ["KMP_INIT_AT_FORK"] = "FALSE"
-os.environ["OMP_NUM_THREADS"] = "1"
+import torch
+
+# Remove potentially problematic environment variables
+for env_var in ['KMP_DUPLICATE_LIB_OK', 'KMP_INIT_AT_FORK', 'OMP_NUM_THREADS']:
+    os.environ.pop(env_var, None)
+
+torch.set_num_threads(torch.get_num_threads())
 
 from config.architecture_config import EXPERIMENT_CONFIG
 from utils import logging_utils
