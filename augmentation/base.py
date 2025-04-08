@@ -1,8 +1,14 @@
+import logging
 import random
 from abc import ABC, abstractmethod
 from typing import List, Callable, Tuple, Union
 
 import torch
+
+from utils import logging_utils
+
+logging_utils.setup_logging(level=logging.INFO)
+logger = logging.getLogger('augmentations')
 
 
 class AugmentationBase(ABC):
@@ -88,8 +94,11 @@ class AugmentationPipeline:
         Apply augmentations in the pipeline with probability based on intensity.
         """
         result = x
+        applied_augs = []
         for aug in self.augmentations:
-            application_probability = aug.intensity if hasattr(aug, 'intensity') else 0.5
-            if random.random() < application_probability:
+            if random.random() <= 0.5:
                 result = aug(result)
+                applied_augs.append(aug.name)
+        if applied_augs:
+            logger.debug(f"Applied augmentations: {applied_augs}")
         return result

@@ -10,6 +10,7 @@ import torch.amp as amp
 from augmentation.advanced import MixUp, CutMix, AdversarialNoise
 from config.architecture_config import EXPERIMENT_CONFIG
 
+
 # Force models to register in experiments
 from models.base import BaseModel # Crucial, do not remove
 
@@ -49,30 +50,10 @@ class ModelTrainer:
         self.counter = 0
 
         precision = EXPERIMENT_CONFIG.get('precision', 'fp32')
-        try:
-            if precision != 'fp32' and torch.cuda.is_available():
-                from utils.utils import setup_mixed_precision
-                self.model, self.scaler = setup_mixed_precision(self.model, precision)
-
-                if precision == 'fp16':
-                    self.amp_dtype = torch.float16
-                    self.use_amp = True
-                elif precision == 'bfp16':
-                    self.amp_dtype = torch.bfloat16
-                    self.use_amp = True
-                elif precision == 'fp8':
-                    self.amp_dtype = torch.bfloat16  # FP8 uses BF16 for autocast
-                    self.use_amp = True
-                else:
-                    self.scaler = None
-                    self.use_amp = False
-            else:
-                self.scaler = None
-                self.use_amp = False
-        except Exception as e:
-            logger.warning(f"Mixed precision initialization failed: {str(e)}. Using fp32 instead.")
-            self.scaler = None
-            self.use_amp = False
+        from utils.utils import setup_mixed_precision
+        self.model, self.scaler, self.use_amp, self.amp_dtype = setup_mixed_precision(self.model, precision)
+        if self.use_amp:
+            logger.info(f"Using {precision} precision for training")
 
     def _initialize_components(self):
         """
@@ -232,8 +213,8 @@ class ModelTrainer:
 
     def evaluate(self, data_loader):
         self.model.eval()
-        total_loss = 0.0
-        correct = 0
+        total_loss_tensor = torch.tensor(0.0, device=self.device)
+        correct_tensor = torch.tensor(0, device=self.device)
         total = 0
 
         precision = EXPERIMENT_CONFIG.get('precision', 'fp32')
@@ -260,13 +241,13 @@ class ModelTrainer:
                     else:
                         pred, loss = outputs, self.criterion(outputs, targets)
 
-                total_loss += loss.item()
+                total_loss_tensor += loss.detach()  # Stay on GPU
                 _, predicted = pred.max(1)
-                correct += predicted.eq(targets).sum().item()
+                correct_tensor += (predicted == targets).sum()  # Stay on GPU
                 total += targets.size(0)
 
-        avg_loss = total_loss / len(data_loader)
-        accuracy = 100.0 * correct / total
+        avg_loss = (total_loss_tensor / len(self.train_loader)).item()
+        accuracy = 100.0 * correct_tensor.item() / total
 
         return {'loss': avg_loss, 'acc': accuracy}
 

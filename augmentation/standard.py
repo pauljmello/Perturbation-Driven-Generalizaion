@@ -14,7 +14,7 @@ class GaussianNoise(AugmentationBase):
         Apply Gaussian noise augmentation.
         """
         noise = torch.randn_like(x) * self.intensity
-        return x + noise
+        return torch.clamp(x + noise, 0, 1)
 
 
 class SaltPepperNoise(AugmentationBase):
@@ -25,10 +25,13 @@ class SaltPepperNoise(AugmentationBase):
         """
         Apply salt and pepper noise augmentation.
         """
-        noise_mask = torch.rand_like(x)
-        salt = (noise_mask < self.intensity / 2).float()
-        pepper = (noise_mask > (1 - self.intensity / 2)).float()
-        return x * (1 - salt - pepper) + salt
+        mask = torch.rand_like(x)
+        result = x.clone()
+        salt_mask = mask < (self.intensity / 2)
+        result[salt_mask] = 1.0
+        pepper_mask = mask > (1 - self.intensity / 2)
+        result[pepper_mask] = 0.0
+        return result
 
 
 class Cutout(AugmentationBase):
@@ -41,37 +44,32 @@ class Cutout(AugmentationBase):
         """
         h, w = x.shape[-2:]
         size = int(min(h, w) * self.intensity)
-
-        # Random coordinates
         y = torch.randint(0, h - size + 1, (1,)).item()
         x_pos = torch.randint(0, w - size + 1, (1,)).item()
-
-        # Apply cutout
         result = x.clone()
         result[:, y:y + size, x_pos:x_pos + size] = 0
-
         return result
 
 
 class RandomErasing(AugmentationBase):
-    """
-    Apply random erasing augmentation.
-    """
+    def __init__(self, intensity):
+        super().__init__(intensity)
+        self._transform = None
+
     def apply(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Apply random erasing augmentation.
-        """
-        transform = transforms.RandomErasing(p=1.0, scale=(0.02, self.intensity), ratio=(0.3, 3.3))
-        return transform(x)
+        if self._transform is None:
+            self._transform = transforms.RandomErasing(p=1.0, scale=(0.02, self.intensity), ratio=(0.3, 3.3))
+        return self._transform(x)
 
 
 class Rotation(AugmentationBase):
     """
-    Apply random rotation augmentation.
+    Apply random rotation augmentation with full tensor operations.
     """
+
     def apply(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Apply rotation augmentation.
+        Apply rotation
         """
         max_angle = self.intensity * 90  # Scale intensity to rotation angle
         angle = torch.rand(1).item() * 2 * max_angle - max_angle  # Random angle
@@ -84,17 +82,33 @@ class Translation(AugmentationBase):
     """
     def apply(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Apply translation augmentation.
+        Apply translation using grid sampling.
         """
-        h, w = x.shape[-2:]
-        max_shift_h = int(h * self.intensity)
-        max_shift_w = int(w * self.intensity)
-        shift_h = torch.randint(-max_shift_h, max_shift_h + 1, (1,)).item()
-        shift_w = torch.randint(-max_shift_w, max_shift_w + 1, (1,)).item()
+        original_ndim = x.ndim
+        if original_ndim == 3:
+            x = x.unsqueeze(0)
 
-        # Apply affine transform
-        return TF.affine(x, angle=0, translate=[shift_w, shift_h], scale=1.0, shear=0)
+        # Get device and sizes
+        device = x.device
+        batch_size, _, height, width = x.shape
 
+        theta = torch.eye(2, 3, device=device).unsqueeze(0).repeat(batch_size, 1, 1)
+
+        # Generate random shifts on proper device
+        max_shift = self.intensity
+        rand_x = torch.rand(batch_size, device=device) * 2 * max_shift - max_shift
+        rand_y = torch.rand(batch_size, device=device) * 2 * max_shift - max_shift
+        theta[:, 0, 2] = rand_x  # x translation
+        theta[:, 1, 2] = rand_y  # y translation
+
+        # Apply the affine transformation
+        grid = torch.nn.functional.affine_grid(theta, x.size(), align_corners=False)
+        transformed = torch.nn.functional.grid_sample(x, grid, align_corners=False)
+
+        if original_ndim == 3:
+            transformed = transformed.squeeze(0)
+
+        return transformed
 
 class Scaling(AugmentationBase):
     """
@@ -164,22 +178,13 @@ class FrequencyDomainTransform(AugmentationBase):
         # Apply FFT
         fft = torch.fft.fft2(x)
 
-        # Modify amplitude
-        amplitude = torch.abs(fft)
-        phase = torch.angle(fft)
+        # Directly modify the FFT result with random scaling
+        # This avoids separate amplitude/phase computation
+        fft_mod = fft * (1 + self.intensity * torch.randn_like(fft.real))
 
-        # Apply random modifications to amplitude
-        amplitude *= (1 + self.intensity * torch.randn_like(amplitude))
+        # Inverse FFT and take absolute value
+        result = torch.abs(torch.fft.ifft2(fft_mod))
 
-        # Reconstruct signal
-        real = amplitude * torch.cos(phase)
-        imag = amplitude * torch.sin(phase)
-        modified_fft = torch.complex(real, imag)
-
-        # Inverse FFT
-        ifft = torch.fft.ifft2(modified_fft)
-        result = torch.abs(ifft)
-
-        # Normalize
-        result = result / result.max()
+        # Normalize using a faster method
+        result = result / (torch.amax(result, dim=(-2, -1), keepdim=True) + 1e-8)
         return torch.clamp(result, 0, 1)

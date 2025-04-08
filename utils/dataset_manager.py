@@ -1,6 +1,5 @@
 import gc
 import logging
-import weakref
 from collections import OrderedDict
 
 import torch

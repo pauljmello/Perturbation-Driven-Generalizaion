@@ -2,20 +2,20 @@ import gc
 import logging
 import random
 import time
-from datetime import datetime
-from itertools import combinations, product
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import psutil
 import torch
-from torch import amp, nn
 
-from utils.checkpoint import CheckpointManager
+from datetime import datetime
+from itertools import combinations, product
+from pathlib import Path
+from torch import amp
+
 from config.architecture_config import AUGMENTATION_CONFIG
 from config.model_registry import ModelRegistry
 from training.trainer import ModelTrainer
+from utils.checkpoint import CheckpointManager
 from utils.model_factory import create_model
 from visualization.report import ReportGenerator
 
@@ -265,7 +265,7 @@ def prepare_augmentation_configs(args, aug_config):
         advanced_augs = aug_config['advanced_augmentations']
         all_augs = standard_augs + advanced_augs
         intensities = aug_config['intensities']
-        max_combo_size = aug_config.get('max_combination_size', 3)
+        max_combo_size = aug_config.get('max_combination_size')
 
         result = []
         for combo_size in range(1, max_combo_size + 1):
@@ -433,29 +433,37 @@ def finalize_experiments(all_results, exp_dir, current_experiment, experiment_co
 # Tools
 
 
-def setup_mixed_precision(model, precision='fp32'):
+def setup_mixed_precision(model, precision):
     """
     Efficiently configure model for mixed precision training with CUDA.
     """
     if precision == 'fp32' or not torch.cuda.is_available():
-        return model, None
+        return model, None, False, None
 
-    if precision == 'fp16':
-        scaler = amp.GradScaler()
-        return model, scaler
-    elif precision == 'bfp16':
-        if not hasattr(torch, 'bfloat16'):
-            logger.warning("bfp16 not supported in this PyTorch version, falling back to fp32")
-            return model, None
-        return model, None
-    elif precision == 'fp8':
-        if hasattr(torch.cuda, 'is_fp8_available') and torch.cuda.is_fp8_available():
-            scaler = amp.GradScaler()  # FP8 needs scaling
-            return model, scaler
+    try:
+        if precision == 'fp16':
+            # FP16 with gradient scaling
+            scaler = amp.GradScaler()
+            amp_dtype = torch.float16
+            use_amp = True
+            logger.info("Successfully set up fp16 mixed precision training")
+            return model, scaler, use_amp, amp_dtype
+
+        elif precision == 'bfp16':
+            # BF16 typically doesn't need gradient scaling
+            if not hasattr(torch, 'bfloat16'):
+                logger.warning("BFloat16 not supported in this PyTorch version, falling back to fp32")
+                return model, None, False, None
+
+            amp_dtype = torch.bfloat16
+            use_amp = True
+            logger.info("Successfully set up bfp16 mixed precision training")
+            return model, None, use_amp, amp_dtype
+
         else:
-            logger.warning("FP8 not supported in this PyTorch version, falling back to bfp16")
-            return setup_mixed_precision(model, 'bfp16')
+            logger.warning(f"Unknown precision format: {precision}, falling back to fp32")
+            return model, None, False, None
 
-    else:
-        logger.warning(f"Unknown precision format: {precision}, falling back to fp32")
-        return model, None
+    except Exception as e:
+        logger.warning(f"Mixed precision initialization failed: {str(e)}. Using fp32 instead.")
+        return model, None, False, None

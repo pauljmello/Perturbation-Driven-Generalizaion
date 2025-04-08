@@ -1,16 +1,9 @@
-import argparse
 import gc
-import logging
-import os
 import sys
+import argparse
+import logging
 
-import torch
-
-# Remove potentially problematic environment variables
-for env_var in ['KMP_DUPLICATE_LIB_OK', 'KMP_INIT_AT_FORK', 'OMP_NUM_THREADS']:
-    os.environ.pop(env_var, None)
-
-torch.set_num_threads(torch.get_num_threads())
+from augmentation_visualizer import visualize_augmentations
 
 from config.architecture_config import EXPERIMENT_CONFIG
 from utils import logging_utils
@@ -44,6 +37,8 @@ def parse_args():
 def main():
     args = parse_args()
     base_random_seed = args.seed if args.seed is not None else EXPERIMENT_CONFIG['random_seed']
+
+    # visualize_augmentations() # OpenMP issue, just run the file seperately.
 
     # Setup environment
     device, exp_dir, checkpoint_manager = setup_environment(base_random_seed, args.output_dir)

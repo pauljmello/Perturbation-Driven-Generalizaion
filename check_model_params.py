@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 
 import pandas as pd
@@ -10,7 +9,6 @@ from tabulate import tabulate
 # Force models to register in experiments
 from models.base import BaseModel # Crucial, do not remove
 
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append('.')
 
 

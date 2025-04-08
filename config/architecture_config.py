@@ -1,28 +1,18 @@
 import copy
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 logger = logging.getLogger('config')
 
-# Dataset
-DATASET_CONFIG = {
-    'mnist': {
-        'input_channels': 1,
-        'input_size': 28,
-        'num_classes': 10,
-        'mean': (0.1307,),
-        'std': (0.3081,),
-    },
-    'cifar10': {
-        'input_channels': 3,
-        'input_size': 32,
-        'num_classes': 10,
-        'mean': (0.4914, 0.4822, 0.4465),
-        'std': (0.2470, 0.2435, 0.2616),
-    }
+
+# Target parameter
+PARAMETER_TARGETS = {
+    'small': 1_000_000,  # ~1M parameters
+    'medium': 3_000_000,  # ~3M parameters
+    'large': 9_000_000,  # ~9M parameters
 }
 
-
+# Define active experiments (uncomment to enable)
 EXPERIMENT_MODEL_TYPES = [
     'mlp',
     'cnn',
@@ -44,8 +34,8 @@ EXPERIMENT_AUGMENTATIONS = [
     'translation',
 #    'cutout',
     'random_erasing',
-    'horizontal_flip',
-    'vertical_flip',
+#    'horizontal_flip',
+#    'vertical_flip',
     'salt_pepper',
     'gaussian_blur',
     'frequency_domain',
@@ -56,10 +46,60 @@ EXPERIMENT_AUGMENTATIONS = [
 #    'adversarial'
 ]
 
+
+
+
+
+
+
+# Define all available model types, sizes and augmentations
+ALL_MODEL_TYPES = [
+    'mlp',
+    'cnn',
+    'transformer',
+    'vit',
+    'vae',
+    'unet'
+]
+
+ALL_MODEL_SIZES = [
+    'small',
+    'medium',
+    'large'
+]
+
+ALL_STANDARD_AUGMENTATIONS = [
+    'gaussian_noise',
+    'rotation',
+    'translation',
+    'cutout',
+    'random_erasing',
+    'horizontal_flip',
+    'vertical_flip',
+    'salt_pepper',
+    'gaussian_blur',
+    'frequency_domain',
+    'scale'
+]
+
+ALL_ADVANCED_AUGMENTATIONS = [
+    'mixup',
+    'cutmix',
+    'augmix',
+    'adversarial'
+]
+
+# Function to filter active standard and advanced augmentations
+def get_active_standard_augmentations() -> List[str]:
+    return [aug for aug in ALL_STANDARD_AUGMENTATIONS if aug in EXPERIMENT_AUGMENTATIONS]
+
+def get_active_advanced_augmentations() -> List[str]:
+    return [aug for aug in ALL_ADVANCED_AUGMENTATIONS if aug in EXPERIMENT_AUGMENTATIONS]
+
 EXPERIMENT_CONFIG = {
     'dataset': 'cifar10',  # Options: 'mnist' or 'cifar10'
     'batch_size': 512,
-    'num_epochs': 50,
+    'num_epochs': 3,
     'learning_rate': 0.001,
     'weight_decay': 1e-5,
     'optimizer': 'adamw',  # Options: 'adam', 'adamw', 'sgd'
@@ -69,35 +109,18 @@ EXPERIMENT_CONFIG = {
     'model_types': EXPERIMENT_MODEL_TYPES,  # Options include: 'mlp', 'cnn', 'transformer', 'vit', 'vae', 'unet'
     'model_sizes': EXPERIMENT_MODEL_SIZES,  # Options: 'small', 'medium', 'large'
     'augmentations': EXPERIMENT_AUGMENTATIONS,  # Data augmentation techniques
-    'precision': 'bfp16',  # Options: 'fp32', 'fp16', 'bfp16'. 'fp8'  Best: bfp16
+    'precision': 'bfp16',  # Options: 'fp32', 'fp16', 'bfp16'  Best: bfp16
     'metrics_precision': 'fp8',  # Options: 'fp32', 'fp8'
 }
 
 # Augmentation
 AUGMENTATION_CONFIG = {
-    'standard_augmentations': [
-        'gaussian_noise',
-        'rotation',
-        'translation',
-        'cutout',
-        'random_erasing',
-        'horizontal_flip',
-        'vertical_flip',
-        'salt_pepper',
-        'gaussian_blur',
-        'frequency_domain',
-        'scale'
-    ],
-    'advanced_augmentations': [
-        'mixup',
-        'cutmix',
-        'augmix',
-        'adversarial'
-    ],
-    'intensities': [0.1, 0.3, 0.5],  # [0.1, 0.3, 0.5]
+    'standard_augmentations': get_active_standard_augmentations(),
+    'advanced_augmentations': get_active_advanced_augmentations(),
+    'intensities': [0.1, 0.3, 0.5],
     'max_combination_size': 2,  # n >= 3 is too large for our resources
 
-    # Prams selected according to respective papers
+    # Params selected according to respective papers
     'mixup_alpha': 0.2,
     'cutmix_alpha': 1.0,
     'augmix_severity': 3,
@@ -105,13 +128,7 @@ AUGMENTATION_CONFIG = {
     'augmix_depth': 2,
 }
 
-# Target parameter
-PARAMETER_TARGETS = {
-    'small': 1_000_000,  # ~1M parameters
-    'medium': 3_000_000,  # ~3M parameters
-    'large': 9_000_000,  # ~9M parameters
-}
-
+# Rest of the file remains unchanged
 # MLP architecture
 MLP_ARCHITECTURE = {
     'small': {
@@ -245,6 +262,24 @@ ARCHITECTURE_CONFIGS = {
     'vit': VIT_ARCHITECTURE,
     'vae': VAE_ARCHITECTURE,
     'unet': UNET_ARCHITECTURE,
+}
+
+# Dataset
+DATASET_CONFIG = {
+    'mnist': {
+        'input_channels': 1,
+        'input_size': 28,
+        'num_classes': 10,
+        'mean': (0.1307,),
+        'std': (0.3081,),
+    },
+    'cifar10': {
+        'input_channels': 3,
+        'input_size': 32,
+        'num_classes': 10,
+        'mean': (0.4914, 0.4822, 0.4465),
+        'std': (0.2470, 0.2435, 0.2616),
+    }
 }
 
 def get_architecture_config(model_type: str, model_size: str, dataset: str = None) -> Dict[str, Any]:

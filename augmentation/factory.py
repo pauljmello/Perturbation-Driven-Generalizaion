@@ -33,7 +33,7 @@ class AugmentationFactory:
     _norm_values = {'mnist': ((0.1307,), (0.3081,)), 'cifar10': ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))}
 
     @classmethod
-    def create_augmentation(cls, name: str, intensity: float = 0.5, **kwargs) -> Union[AugmentationBase, BatchAugmentationBase]:
+    def create_augmentation(cls, name: str, intensity: float, **kwargs) -> Union[AugmentationBase, BatchAugmentationBase]:
         """
         Create an augmentation by name.
         """
